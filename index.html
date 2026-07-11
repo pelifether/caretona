@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#12151c" />
+    <title>Caretona — Face Match Game</title>
+    <meta name="description" content="Mimic the careta! A face-matching mini-game inspired by Mario Party's Face Lift." />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Titan+One&family=Nunito:wght@600;800&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <!-- ============ TOP HALF: reference face ============ -->
+      <section id="top-half">
+        <canvas id="ref-canvas"></canvas>
+        <canvas id="ref-mesh" class="mesh-canvas"></canvas>
+        <div id="phase-timer" class="hidden">6</div>
+        <div id="careta-name" class="hidden"></div>
+      </section>
+
+      <!-- ============ BOTTOM HALF: menu / camera ============ -->
+      <section id="bottom-half">
+        <video id="cam" class="hidden" playsinline muted autoplay></video>
+        <canvas id="freeze-canvas" class="mesh-canvas hidden"></canvas>
+        <canvas id="cam-mesh" class="mesh-canvas hidden"></canvas>
+
+        <div id="menu">
+          <button id="play-btn" class="big-btn">
+            <span style="--c:#ff5252">P</span><span style="--c:#ffb300">L</span><span style="--c:#40c4ff">A</span><span style="--c:#69f0ae">Y</span>
+          </button>
+          <div id="mode-buttons" class="hidden">
+            <button id="alone-btn" class="big-btn small">ALONE</button>
+            <button id="invite-btn" class="big-btn small alt">INVITE FRIEND</button>
+          </div>
+          <div id="cam-hint" class="hidden">Allow camera access to play!</div>
+        </div>
+
+        <div id="score-display" class="hidden">0</div>
+
+        <div id="result-menu" class="hidden">
+          <button id="again-btn" class="big-btn small">PLAY AGAIN</button>
+          <button id="invite-btn-2" class="big-btn small alt">INVITE FRIEND</button>
+        </div>
+
+        <div id="no-face-warning" class="hidden">⚠️ No face detected!</div>
+        <button id="info-btn" aria-label="Rules">?</button>
+      </section>
+
+      <!-- ============ Overlays ============ -->
+      <div id="countdown" class="hidden"></div>
+      <div id="flash"></div>
+
+      <dialog id="info-popup">
+        <h2>How to play</h2>
+        <p>The face on top will pull a ridiculous expression — a <em>careta</em>.</p>
+        <p>When the timer starts, you have <strong>6 seconds</strong> to copy it with your own face in the camera.</p>
+        <p>At the flash, your face is frozen and scored from <strong>0 to 100</strong>. 100 is a perfect mimic!</p>
+        <p class="fine">Your camera stays on your device — nothing is uploaded, ever.</p>
+        <button class="big-btn small close-popup">GOT IT</button>
+      </dialog>
+
+      <dialog id="invite-popup">
+        <h2>Not available yet!</h2>
+        <p>Sorry — multiplayer is coming soon. 🎉</p>
+        <button class="big-btn small close-popup">OK</button>
+      </dialog>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
