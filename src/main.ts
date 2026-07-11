@@ -1,105 +1,370 @@
 import './style.css';
 import { ReferenceFace, faceMeshPoints } from './referenceFace';
-import { randomCareta, type Careta } from './caretas';
+import { CARETAS, randomCareta, type Careta } from './caretas';
 import { createTracker } from './tracker';
-import { computeScore, averageShapes } from './scoring';
+import { computeScore, averageShapes, scoreTag } from './scoring';
 import type { Shape } from './blendshapes';
+import type { Session, HostHandle } from './net';
 
 // ------------------------------------------------------------------ elements
 
 const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
+const qs = <T extends HTMLElement>(sel: string): T => document.querySelector(sel) as T;
 
 const refCanvas = $<HTMLCanvasElement>('ref-canvas');
 const refMesh = $<HTMLCanvasElement>('ref-mesh');
-const camMesh = $<HTMLCanvasElement>('cam-mesh');
-const freezeCanvas = $<HTMLCanvasElement>('freeze-canvas');
+const meshSelf = $<HTMLCanvasElement>('mesh-self');
+const meshFriend = $<HTMLCanvasElement>('mesh-friend');
+const freezeSelf = $<HTMLCanvasElement>('freeze-self');
+const freezeFriend = $<HTMLCanvasElement>('freeze-friend');
 const video = $<HTMLVideoElement>('cam');
+const camRemote = $<HTMLVideoElement>('cam-remote');
+const paneSelf = $('pane-self');
+const paneFriend = $('pane-friend');
+const bottomHalf = $('bottom-half');
 const menu = $('menu');
 const playBtn = $('play-btn');
 const modeButtons = $('mode-buttons');
-const aloneBtn = $('alone-btn');
 const camHint = $('cam-hint');
 const countdownEl = $('countdown');
 const phaseTimer = $('phase-timer');
 const caretaName = $('careta-name');
 const noFaceWarning = $('no-face-warning');
 const flash = $('flash');
-const scoreDisplay = $('score-display');
 const resultMenu = $('result-menu');
+const againBtn = $('again-btn');
+const inviteBtn2 = $('invite-btn-2');
+const byeBtn = $('bye-btn');
+const friendReadyChip = $('friend-ready-chip');
+const waiting = $('waiting');
+const waitingText = $('waiting-text');
+const cancelInviteBtn = $('cancel-invite-btn');
+const toast = $('toast');
 const infoPopup = $<HTMLDialogElement>('info-popup');
-const invitePopup = $<HTMLDialogElement>('invite-popup');
+const mpPopup = $<HTMLDialogElement>('mp-popup');
+
+const scoreSelf = $('score-self');
+const scoreFriend = $('score-friend');
 
 const refFace = new ReferenceFace(refCanvas);
 const tracker = createTracker();
 
-const NEUTRAL: Shape = {};
-refFace.setShape(NEUTRAL, 0, true);
+// ------------------------------------------------------------------ state
 
+type Mode = 'solo' | 'host' | 'guest';
+let mode: Mode = 'solo';
+let session: Session | null = null;
+let hostHandle: HostHandle | null = null;
 let currentCareta: Careta | null = null;
 let cameraReady = false;
+let selfReady = false;
+let friendReady = false;
+let atResults = false;
+let leavingIntentionally = false;
+let remoteResult: { v: number; pts: Array<[number, number]> | null } | null = null;
+let roundToken = 0;
+
+const guestRoomId = new URLSearchParams(location.search).get('join');
 
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
 function show(el: HTMLElement) { el.classList.remove('hidden'); }
 function hide(el: HTMLElement) { el.classList.add('hidden'); }
 
-// ------------------------------------------------------------------ menu wiring
-
-playBtn.addEventListener('click', () => {
-  hide(playBtn);
-  show(modeButtons);
-});
-
-for (const id of ['invite-btn', 'invite-btn-2']) {
-  $(id).addEventListener('click', () => invitePopup.showModal());
+function showToast(msg: string, ms = 2200): void {
+  toast.textContent = msg;
+  show(toast);
+  setTimeout(() => hide(toast), ms);
 }
 
-$('info-btn').addEventListener('click', () => infoPopup.showModal());
+function mpNotice(title: string, text: string): void {
+  $('mp-popup-title').textContent = title;
+  $('mp-popup-text').textContent = text;
+  if (!mpPopup.open) mpPopup.showModal();
+}
 
+// ------------------------------------------------------------------ static wiring
+
+$('info-btn').addEventListener('click', () => infoPopup.showModal());
 for (const btn of document.querySelectorAll<HTMLButtonElement>('.close-popup')) {
   btn.addEventListener('click', () => (btn.closest('dialog') as HTMLDialogElement).close());
 }
 
-aloneBtn.addEventListener('click', async () => {
-  camHint.textContent = 'Allow camera access to play!';
-  show(camHint);
-  try {
-    if (!cameraReady) {
-      await tracker.start(video);
-      cameraReady = true;
-    }
-    hide(menu);
-    show(video);
-    startRound();
-  } catch (err) {
-    console.error(err);
-    camHint.textContent = 'Camera access is required to play. Check your browser settings and try again!';
+$('style-btn').addEventListener('click', () => refFace.toggleStyle());
+
+if (new URLSearchParams(location.search).has('mock')) {
+  // Test hook: pose the reference face directly (used by scripts/face-gallery.mjs).
+  (window as unknown as Record<string, unknown>).__setFacePose = (style: string, name: string) => {
+    while (refFace.getStyle() !== style) refFace.toggleStyle();
+    const careta = CARETAS.find((c) => c.name === name);
+    refFace.setShape(careta ? careta.shape : {}, 200, !careta);
+  };
+}
+
+if (guestRoomId) {
+  // Arriving through an invite link: PLAY becomes JOIN.
+  playBtn.innerHTML =
+    '<span style="--c:#ff5252">J</span><span style="--c:#ffb300">O</span><span style="--c:#40c4ff">I</span><span style="--c:#69f0ae">N</span>';
+}
+
+playBtn.addEventListener('click', () => {
+  if (guestRoomId) {
+    void joinAsGuest(guestRoomId);
+  } else {
+    hide(playBtn);
+    show(modeButtons);
   }
 });
 
-$('again-btn').addEventListener('click', () => {
-  hide(resultMenu);
-  hide(scoreDisplay);
-  scoreDisplay.classList.remove('raised');
-  hide(freezeCanvas);
-  hide(camMesh);
-  clearCanvas(refMesh);
-  startRound();
+$('alone-btn').addEventListener('click', async () => {
+  if (!(await ensureCamera())) return;
+  hide(menu);
+  void beginRound(pickCareta());
 });
+
+$('invite-btn').addEventListener('click', () => void startHosting());
+inviteBtn2.addEventListener('click', () => void startHosting());
+
+againBtn.addEventListener('click', () => {
+  if (mode === 'solo') {
+    resetRoundUI();
+    void beginRound(pickCareta());
+  } else {
+    selfReady = true;
+    againBtn.classList.add('pressed');
+    againBtn.textContent = 'READY ✓';
+    session?.send({ t: 'ready' });
+    maybeStartNextMultiRound();
+  }
+});
+
+byeBtn.addEventListener('click', () => {
+  leavingIntentionally = true;
+  session?.send({ t: 'bye' });
+  setTimeout(() => exitMultiplayer(), 150); // let the message flush
+});
+
+cancelInviteBtn.addEventListener('click', () => {
+  hostHandle?.cancel();
+  hostHandle = null;
+  exitMultiplayer();
+});
+
+// ------------------------------------------------------------------ camera
+
+async function ensureCamera(): Promise<boolean> {
+  if (cameraReady) return true;
+  camHint.textContent = 'Allow camera access to play!';
+  show(camHint);
+  try {
+    await tracker.start(video);
+    cameraReady = true;
+    hide(camHint);
+    show(video);
+    return true;
+  } catch (err) {
+    console.error(err);
+    camHint.textContent = 'Camera access is required to play. Check your browser settings and try again!';
+    return false;
+  }
+}
+
+// ------------------------------------------------------------------ multiplayer
+
+async function startHosting(): Promise<void> {
+  if (!(await ensureCamera())) return;
+  const { hostRoom } = await import('./net');
+
+  resetRoundUI();
+  hide(menu);
+  refFace.setShape({}, 400, true);
+  hide(caretaName);
+
+  mode = 'host';
+  bottomHalf.classList.add('split');
+  show(paneFriend);
+  waitingText.textContent = 'Waiting for friend…';
+  show(waiting);
+  show(cancelInviteBtn);
+
+  try {
+    hostHandle = await hostRoom(tracker.getStream()!);
+  } catch (err) {
+    console.error(err);
+    mpNotice('Connection failed', 'Could not reach the matchmaking service. Try again in a moment!');
+    exitMultiplayer();
+    return;
+  }
+
+  (window as unknown as Record<string, unknown>).__caretonaLink = hostHandle.link;
+  void shareLink(hostHandle.link);
+
+  const mySession = await hostHandle.guest; // never resolves if cancelled
+  if (mode !== 'host' || !hostHandle) return;
+  session = mySession;
+  wireSession();
+  hide(waiting);
+
+  await sleep(600); // let media streams settle
+  startNextMultiRound();
+}
+
+async function joinAsGuest(roomId: string): Promise<void> {
+  if (!(await ensureCamera())) return;
+  const { joinRoom } = await import('./net');
+
+  resetRoundUI();
+  hide(menu);
+  mode = 'guest';
+  bottomHalf.classList.add('split');
+  show(paneFriend);
+  waitingText.textContent = 'Connecting…';
+  show(waiting);
+  hide(cancelInviteBtn);
+
+  try {
+    session = await joinRoom(roomId, tracker.getStream()!);
+  } catch {
+    exitMultiplayer();
+    mpNotice('This invite has been cancelled', 'Ask your friend for a fresh link!');
+    history.replaceState(null, '', location.pathname + (new URLSearchParams(location.search).has('mock') ? '?mock=1' : ''));
+    return;
+  }
+  wireSession();
+  waitingText.textContent = 'Starting…';
+}
+
+function wireSession(): void {
+  if (!session) return;
+  session.onRemoteStream = (stream) => {
+    camRemote.srcObject = stream;
+    void camRemote.play().catch(() => {});
+    hide(waiting);
+  };
+  session.onMessage = (msg) => {
+    if (msg.t === 'start') {
+      resetRoundUI();
+      void beginRound(CARETAS[msg.careta]);
+    } else if (msg.t === 'score') {
+      remoteResult = { v: msg.v, pts: msg.pts };
+    } else if (msg.t === 'ready') {
+      friendReady = true;
+      if (atResults) show(friendReadyChip);
+      maybeStartNextMultiRound();
+    } else if (msg.t === 'bye') {
+      leavingIntentionally = true;
+      exitMultiplayer();
+      mpNotice('Friend left', 'Your friend left the game 👋');
+    }
+  };
+  session.onClose = () => {
+    if (leavingIntentionally) return;
+    exitMultiplayer();
+    mpNotice('Disconnected', 'Connection to your friend was lost 😢');
+  };
+}
+
+function maybeStartNextMultiRound(): void {
+  if (mode === 'host' && selfReady && friendReady) startNextMultiRound();
+}
+
+function startNextMultiRound(): void {
+  const careta = pickCareta();
+  session?.send({ t: 'start', careta: CARETAS.indexOf(careta) });
+  resetRoundUI();
+  void beginRound(careta);
+}
+
+function exitMultiplayer(): void {
+  const wasAtResults = atResults;
+  roundToken++; // abort any round in flight
+  session?.close();
+  session = null;
+  hostHandle = null;
+  mode = 'solo';
+  leavingIntentionally = false;
+  remoteResult = null;
+  selfReady = friendReady = false;
+
+  camRemote.srcObject = null;
+  camRemote.classList.remove('bubble');
+  bottomHalf.classList.remove('split');
+  hide(paneFriend);
+  hide(waiting);
+  paneSelf.classList.remove('winner');
+  paneFriend.classList.remove('winner');
+  hide(scoreFriend);
+  hide(friendReadyChip);
+
+  if (wasAtResults) {
+    configureResultButtons();
+  } else {
+    resetRoundUI();
+    hide(caretaName);
+    refFace.setShape({}, 400, true);
+    show(menu);
+    if (!guestRoomId) {
+      hide(playBtn);
+      show(modeButtons);
+    } else {
+      show(playBtn);
+    }
+  }
+}
+
+async function shareLink(link: string): Promise<void> {
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: 'Caretona', text: 'Face-off with me! 😜', url: link });
+      return;
+    } catch { /* fall through to clipboard */ }
+  }
+  try {
+    await navigator.clipboard.writeText(link);
+    showToast('Invite link copied! Send it to your friend');
+  } catch {
+    showToast('Copy the link from the address bar');
+  }
+}
 
 // ------------------------------------------------------------------ round flow
 
-async function startRound(): Promise<void> {
+function pickCareta(): Careta {
   currentCareta = randomCareta(currentCareta ?? undefined);
+  return currentCareta;
+}
+
+function resetRoundUI(): void {
+  hide(resultMenu);
+  againBtn.classList.remove('pressed');
+  againBtn.textContent = 'PLAY AGAIN';
+  hide(friendReadyChip);
+  atResults = false;
+  selfReady = friendReady = false;
+  remoteResult = null;
+
+  for (const wrap of [scoreSelf, scoreFriend]) {
+    hide(wrap);
+    wrap.classList.remove('final', 'raised');
+  }
+  for (const c of [freezeSelf, freezeFriend, meshSelf, meshFriend, refMesh]) {
+    c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+    if (c !== refMesh) hide(c);
+  }
+  video.classList.remove('bubble');
+  camRemote.classList.remove('bubble');
+  paneSelf.classList.remove('winner');
+  paneFriend.classList.remove('winner');
+}
+
+async function beginRound(careta: Careta): Promise<void> {
+  const token = ++roundToken;
+  currentCareta = careta;
   tracker.setMockTarget({});
 
-  caretaName.textContent = `“${currentCareta.name}”`;
+  caretaName.textContent = `“${careta.name}”`;
   show(caretaName);
+  refFace.setShape(careta.shape, 2000, false);
 
-  // Reference face stretches into the careta over the first 2s, then freezes.
-  refFace.setShape(currentCareta.shape, 2000, false);
-
-  // 3, 2, 1, GO
   const ticks: Array<[string, string]> = [
     ['3', '#ff5252'],
     ['2', '#ffb300'],
@@ -114,14 +379,15 @@ async function startRound(): Promise<void> {
     span.style.color = color;
     countdownEl.replaceChildren(span);
     await sleep(850);
+    if (token !== roundToken) { hide(countdownEl); return; }
   }
   hide(countdownEl);
   countdownEl.replaceChildren();
 
-  await caretaPhase();
+  await caretaPhase(token);
 }
 
-async function caretaPhase(): Promise<void> {
+async function caretaPhase(token: number): Promise<void> {
   const DURATION = 6000;
   const careta = currentCareta!;
   tracker.setMockTarget(careta.shape);
@@ -135,6 +401,7 @@ async function caretaPhase(): Promise<void> {
 
   await new Promise<void>((resolve) => {
     const tick = () => {
+      if (token !== roundToken) { resolve(); return; }
       const now = performance.now();
       const left = DURATION - (now - start);
       if (left <= 0) { resolve(); return; }
@@ -155,73 +422,132 @@ async function caretaPhase(): Promise<void> {
 
   hide(phaseTimer);
   hide(noFaceWarning);
+  if (token !== roundToken) return;
 
-  // FLASH — freeze the player
+  // FLASH — freeze everyone
   flash.classList.remove('go');
-  void flash.offsetWidth; // restart animation
+  void flash.offsetWidth;
   flash.classList.add('go');
 
   const finalResult = tracker.latest();
-  freezeVideoFrame();
+  freezeVideoFrame(video, freezeSelf, true);
+  if (mode !== 'solo') freezeVideoFrame(camRemote, freezeFriend, false);
 
-  // Score on the average of the last 600 ms of detected frames (robust to jitter).
   const end = performance.now();
   const recent = samples.filter((s) => s.detected && end - s.time <= 600).map((s) => s.shape);
   const anyDetected = recent.length > 0 || finalResult.faceDetected;
   const playerShape = recent.length > 0 ? averageShapes(recent) : finalResult.shape;
   const score = anyDetected ? computeScore(playerShape, careta.shape) : 0;
 
+  if (mode !== 'solo') {
+    session?.send({ t: 'score', v: score, pts: subsample(finalResult.landmarks) });
+  }
+
   await sleep(450);
-  await scoringPhase(score, finalResult.landmarks);
+  if (token !== roundToken) return;
+  await scoringPhase(token, score, finalResult.landmarks);
 }
 
-async function scoringPhase(score: number, landmarks: Array<[number, number]> | null): Promise<void> {
-  // --- Mesh scan: light up keypoints on both faces
+async function scoringPhase(token: number, score: number, landmarks: Array<[number, number]> | null): Promise<void> {
+  const multi = mode !== 'solo';
+
+  // In multiplayer, give the friend's score message a moment to arrive.
+  if (multi) {
+    const deadline = performance.now() + 3500;
+    while (!remoteResult && performance.now() < deadline && token === roundToken) await sleep(80);
+  }
+  if (token !== roundToken) return;
+
+  // --- Mesh scan
   const SCAN_MS = 1500;
   const refPts = faceMeshPoints(refMesh.clientWidth, refMesh.clientHeight, refFace.getShape());
-  const camPts = landmarks ? projectLandmarks(landmarks, camMesh) : [];
-  show(camMesh);
+  const selfPts = landmarks ? projectLandmarks(subsample(landmarks)!, meshSelf, video, true) : [];
+  const friendPts = multi && remoteResult?.pts
+    ? projectLandmarks(remoteResult.pts, meshFriend, camRemote, false)
+    : [];
+  show(meshSelf);
+  if (multi) show(meshFriend);
 
   const scanStart = performance.now();
   await new Promise<void>((resolve) => {
     const tick = () => {
+      if (token !== roundToken) { resolve(); return; }
       const t = Math.min(1, (performance.now() - scanStart) / SCAN_MS);
       drawScan(refMesh, refPts, t);
-      drawScan(camMesh, camPts, t);
+      drawScan(meshSelf, selfPts, t);
+      if (multi) drawScan(meshFriend, friendPts, t);
       if (t >= 1) { resolve(); return; }
       requestAnimationFrame(tick);
     };
     tick();
   });
+  if (token !== roundToken) return;
 
-  // --- Score count-up: 2s, decelerating (ease-out) for drama
-  show(scoreDisplay);
-  scoreDisplay.classList.remove('final');
+  // --- Count-up (2s, decelerating)
+  const numSelf = qs<HTMLElement>('#score-self .score-num');
+  const numFriend = qs<HTMLElement>('#score-friend .score-num');
+  show(scoreSelf);
+  if (multi) show(scoreFriend);
+
+  const friendScore = remoteResult?.v ?? 0;
   const COUNT_MS = 2000;
   const countStart = performance.now();
   await new Promise<void>((resolve) => {
     const tick = () => {
+      if (token !== roundToken) { resolve(); return; }
       const t = Math.min(1, (performance.now() - countStart) / COUNT_MS);
       const eased = 1 - Math.pow(1 - t, 3);
-      scoreDisplay.textContent = String(Math.round(score * eased));
+      numSelf.textContent = String(Math.round(score * eased));
+      if (multi) numFriend.textContent = String(Math.round(friendScore * eased));
       if (t >= 1) { resolve(); return; }
       requestAnimationFrame(tick);
     };
     tick();
   });
-  scoreDisplay.textContent = String(score);
-  scoreDisplay.classList.add('final');
+  if (token !== roundToken) return;
+
+  finalizeScore(scoreSelf, score);
+  if (multi) {
+    finalizeScore(scoreFriend, friendScore);
+    if (score !== friendScore) {
+      (score > friendScore ? paneSelf : paneFriend).classList.add('winner');
+    }
+  }
 
   await sleep(600);
-  scoreDisplay.classList.add('raised');
+  if (token !== roundToken) return;
+
+  // --- Results
+  scoreSelf.classList.add('raised');
+  if (multi) scoreFriend.classList.add('raised');
+
+  // Live cam bubbles over the frozen frames
+  video.classList.add('bubble');
+  if (multi) camRemote.classList.add('bubble');
+
+  atResults = true;
+  configureResultButtons();
+  if (multi && friendReady) show(friendReadyChip);
   show(resultMenu);
 }
 
-// ------------------------------------------------------------------ rendering helpers
-
-function clearCanvas(canvas: HTMLCanvasElement): void {
-  canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+function configureResultButtons(): void {
+  const multi = mode !== 'solo';
+  byeBtn.classList.toggle('hidden', !multi);
+  inviteBtn2.classList.toggle('hidden', multi);
 }
+
+function finalizeScore(wrap: HTMLElement, score: number): void {
+  const tag = scoreTag(score);
+  const tagEl = wrap.querySelector('.score-tag') as HTMLElement;
+  const numEl = wrap.querySelector('.score-num') as HTMLElement;
+  numEl.textContent = String(score);
+  tagEl.textContent = tag.label;
+  tagEl.style.color = tag.color;
+  wrap.classList.add('final');
+}
+
+// ------------------------------------------------------------------ rendering helpers
 
 function sizeCanvas(canvas: HTMLCanvasElement): CanvasRenderingContext2D {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -241,18 +567,28 @@ function coverTransform(sw: number, sh: number, w: number, h: number) {
   return { scale, dx: (w - sw * scale) / 2, dy: (h - sh * scale) / 2 };
 }
 
-/** Map normalized video landmarks into (mirrored) element pixel coords. */
-function projectLandmarks(landmarks: Array<[number, number]>, canvas: HTMLCanvasElement): Array<[number, number]> {
-  const w = canvas.clientWidth, h = canvas.clientHeight;
-  const sw = video.videoWidth || 480, sh = video.videoHeight || 640;
-  const { scale, dx, dy } = coverTransform(sw, sh, w, h);
+function subsample(landmarks: Array<[number, number]> | null): Array<[number, number]> | null {
+  if (!landmarks) return null;
   const step = Math.max(1, Math.floor(landmarks.length / 80));
-  const pts: Array<[number, number]> = [];
-  for (let i = 0; i < landmarks.length; i += step) {
-    const [nx, ny] = landmarks[i];
-    pts.push([w - (nx * sw * scale + dx), ny * sh * scale + dy]); // mirrored x
-  }
-  return pts;
+  const out: Array<[number, number]> = [];
+  for (let i = 0; i < landmarks.length; i += step) out.push(landmarks[i]);
+  return out;
+}
+
+/** Map normalized video landmarks into element pixel coords. */
+function projectLandmarks(
+  landmarks: Array<[number, number]>,
+  canvas: HTMLCanvasElement,
+  videoEl: HTMLVideoElement,
+  mirror: boolean,
+): Array<[number, number]> {
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const sw = videoEl.videoWidth || 480, sh = videoEl.videoHeight || 640;
+  const { scale, dx, dy } = coverTransform(sw, sh, w, h);
+  return landmarks.map(([nx, ny]) => {
+    const x = nx * sw * scale + dx;
+    return [mirror ? w - x : x, ny * sh * scale + dy];
+  });
 }
 
 function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progress: number): void {
@@ -262,10 +598,9 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
   if (pts.length === 0) return;
 
   const visible = Math.floor(pts.length * Math.min(1, progress * 1.15));
-  // Settle at a faint 30% so the "mapped" mesh stays visible during the score count-up.
+  // Settle at a faint 30% so the "mapped" mesh stays visible during the count-up.
   const fade = progress > 0.85 ? Math.max(0.3, 1 - ((progress - 0.85) / 0.15) * 0.7) : 1;
 
-  // Sweeping scanline
   if (progress < 0.9) {
     const y = h * (progress / 0.9);
     const grad = ctx.createLinearGradient(0, y - 40, 0, y + 3);
@@ -277,7 +612,6 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
 
   ctx.globalAlpha = fade;
 
-  // Connect each point to its 2 nearest visible neighbours
   ctx.strokeStyle = 'rgba(100,255,218,0.35)';
   ctx.lineWidth = 1;
   for (let i = 1; i < visible; i++) {
@@ -295,7 +629,6 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
     }
   }
 
-  // Glowing keypoints
   for (let i = 0; i < visible; i++) {
     const isNewest = i >= visible - 3;
     ctx.beginPath();
@@ -309,15 +642,19 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
   ctx.globalAlpha = 1;
 }
 
-function freezeVideoFrame(): void {
-  const ctx = sizeCanvas(freezeCanvas);
-  const w = freezeCanvas.clientWidth, h = freezeCanvas.clientHeight;
-  const sw = video.videoWidth || 480, sh = video.videoHeight || 640;
+function freezeVideoFrame(videoEl: HTMLVideoElement, canvas: HTMLCanvasElement, mirror: boolean): void {
+  const ctx = sizeCanvas(canvas);
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  const sw = videoEl.videoWidth || 480, sh = videoEl.videoHeight || 640;
   const { scale, dx, dy } = coverTransform(sw, sh, w, h);
   ctx.save();
-  ctx.translate(w, 0);
-  ctx.scale(-1, 1); // mirror to match the live preview
-  ctx.drawImage(video, dx, dy, sw * scale, sh * scale);
+  if (mirror) {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
+  try {
+    ctx.drawImage(videoEl, dx, dy, sw * scale, sh * scale);
+  } catch { /* remote stream may not have a frame yet */ }
   ctx.restore();
-  show(freezeCanvas);
+  show(canvas);
 }

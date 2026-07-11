@@ -19,13 +19,41 @@
         <canvas id="ref-mesh" class="mesh-canvas"></canvas>
         <div id="phase-timer" class="hidden">6</div>
         <div id="careta-name" class="hidden"></div>
+        <button id="style-btn" aria-label="Switch face style" title="Switch face style">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 12a9 9 0 0 1 15.5-6.2M21 12a9 9 0 0 1-15.5 6.2" />
+            <polyline points="18.5 2.5 18.5 6.5 14.5 6.5" />
+            <polyline points="5.5 21.5 5.5 17.5 9.5 17.5" />
+          </svg>
+        </button>
       </section>
 
-      <!-- ============ BOTTOM HALF: menu / camera ============ -->
+      <!-- ============ BOTTOM HALF: menu / camera panes ============ -->
       <section id="bottom-half">
-        <video id="cam" class="hidden" playsinline muted autoplay></video>
-        <canvas id="freeze-canvas" class="mesh-canvas hidden"></canvas>
-        <canvas id="cam-mesh" class="mesh-canvas hidden"></canvas>
+        <div id="pane-self" class="pane">
+          <video id="cam" class="hidden" playsinline muted autoplay></video>
+          <canvas id="freeze-self" class="mesh-canvas hidden"></canvas>
+          <canvas id="mesh-self" class="mesh-canvas hidden"></canvas>
+          <div id="score-self" class="score-wrap hidden">
+            <div class="score-tag"></div>
+            <div class="score-num">0</div>
+          </div>
+        </div>
+
+        <div id="pane-friend" class="pane hidden">
+          <video id="cam-remote" playsinline muted autoplay></video>
+          <canvas id="freeze-friend" class="mesh-canvas hidden"></canvas>
+          <canvas id="mesh-friend" class="mesh-canvas hidden"></canvas>
+          <div id="score-friend" class="score-wrap hidden">
+            <div class="score-tag"></div>
+            <div class="score-num">0</div>
+          </div>
+          <div id="waiting" class="hidden">
+            <div class="spinner"></div>
+            <div id="waiting-text">Waiting for friend…</div>
+            <button id="cancel-invite-btn" aria-label="Cancel invite">✕</button>
+          </div>
+        </div>
 
         <div id="menu">
           <button id="play-btn" class="big-btn">
@@ -38,11 +66,11 @@
           <div id="cam-hint" class="hidden">Allow camera access to play!</div>
         </div>
 
-        <div id="score-display" class="hidden">0</div>
-
         <div id="result-menu" class="hidden">
+          <div id="friend-ready-chip" class="hidden">✓ Friend pressed PLAY AGAIN</div>
           <button id="again-btn" class="big-btn small">PLAY AGAIN</button>
           <button id="invite-btn-2" class="big-btn small alt">INVITE FRIEND</button>
+          <button id="bye-btn" class="big-btn small bye hidden">BYE FRIEND</button>
         </div>
 
         <div id="no-face-warning" class="hidden">⚠️ No face detected!</div>
@@ -52,19 +80,21 @@
       <!-- ============ Overlays ============ -->
       <div id="countdown" class="hidden"></div>
       <div id="flash"></div>
+      <div id="toast" class="hidden"></div>
 
       <dialog id="info-popup">
         <h2>How to play</h2>
         <p>The face on top will pull a ridiculous expression — a <em>careta</em>.</p>
         <p>When the timer starts, you have <strong>6 seconds</strong> to copy it with your own face in the camera.</p>
         <p>At the flash, your face is frozen and scored from <strong>0 to 100</strong>. 100 is a perfect mimic!</p>
-        <p class="fine">Your camera stays on your device — nothing is uploaded, ever.</p>
+        <p>Or invite a friend and battle face-to-face — highest score wins.</p>
+        <p class="fine">Video goes directly between players — nothing is ever uploaded to a server.</p>
         <button class="big-btn small close-popup">GOT IT</button>
       </dialog>
 
-      <dialog id="invite-popup">
-        <h2>Not available yet!</h2>
-        <p>Sorry — multiplayer is coming soon. 🎉</p>
+      <dialog id="mp-popup">
+        <h2 id="mp-popup-title"></h2>
+        <p id="mp-popup-text"></p>
         <button class="big-btn small close-popup">OK</button>
       </dialog>
     </div>

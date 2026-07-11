@@ -90,38 +90,158 @@ body {
   z-index: 5;
 }
 
-/* ============ Bottom half ============ */
+#style-btn {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.14);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 6;
+  backdrop-filter: blur(4px);
+  transition: transform 0.15s;
+}
+
+#style-btn:active {
+  background: rgba(255, 255, 255, 0.28);
+  transform: rotate(180deg);
+}
+
+/* ============ Bottom half & panes ============ */
 #bottom-half {
   flex: 1;
   position: relative;
   background: #12151c;
   display: flex;
-  align-items: center;
-  justify-content: center;
   overflow: hidden;
 }
 
-#cam {
+.pane {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#pane-friend {
+  border-left: 2px solid rgba(255, 255, 255, 0.15);
+}
+
+.pane video {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+#cam {
   transform: scaleX(-1);
 }
 
-#freeze-canvas {
+.pane .mesh-canvas {
   z-index: 2;
 }
 
-#cam-mesh {
+.pane canvas[id^='mesh'] {
   z-index: 3;
+}
+
+/* Live cam bubble shown while the freeze frame is up */
+video.bubble {
+  inset: auto !important;
+  left: 10px !important;
+  bottom: 10px !important;
+  width: clamp(64px, 22vw, 96px) !important;
+  height: clamp(64px, 22vw, 96px) !important;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.55);
+  z-index: 8;
+  animation: bubble-pop 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes bubble-pop {
+  from {
+    transform: scale(0) scaleX(-1);
+  }
+}
+
+#cam.bubble {
+  transform: scaleX(-1);
+}
+
+/* Winner pane glow */
+.pane.winner {
+  box-shadow: inset 0 0 0 4px #ffd700, inset 0 0 40px rgba(255, 215, 0, 0.25);
+}
+
+/* ============ Waiting (multiplayer lobby) ============ */
+#waiting {
+  position: relative;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 10px;
+  text-align: center;
+}
+
+.spinner {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 5px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #40c4ff;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+#waiting-text {
+  font-weight: 800;
+  font-size: 0.9rem;
+  color: #cfd8dc;
+  animation: pulse-soft 1.4s infinite;
+}
+
+#cancel-invite-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(216, 43, 43, 0.85);
+  color: #fff;
+  font-size: 1.1rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+#cancel-invite-btn:active {
+  background: #d82b2b;
 }
 
 /* ============ Buttons ============ */
 #menu,
 #result-menu {
-  position: relative;
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
   z-index: 10;
   display: flex;
   flex-direction: column;
@@ -130,10 +250,6 @@ body {
 }
 
 #result-menu {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
   animation: pop-in-centered 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 
@@ -155,7 +271,7 @@ body {
   color: #222;
   cursor: pointer;
   box-shadow: 0 6px 0 rgba(0, 0, 0, 0.45), 0 12px 30px rgba(0, 0, 0, 0.5);
-  transition: transform 0.1s, box-shadow 0.1s;
+  transition: transform 0.1s, box-shadow 0.1s, opacity 0.2s;
   touch-action: manipulation;
   white-space: nowrap;
 }
@@ -191,6 +307,22 @@ body {
   box-shadow: 0 2px 0 #0d5d8f, 0 5px 12px rgba(0, 0, 0, 0.5);
 }
 
+.big-btn.small.bye {
+  background: linear-gradient(180deg, #ff8a65, #e05537);
+  color: #4a1505;
+  box-shadow: 0 5px 0 #8f2d0d, 0 10px 24px rgba(0, 0, 0, 0.5);
+}
+
+.big-btn.small.bye:active {
+  box-shadow: 0 2px 0 #8f2d0d, 0 5px 12px rgba(0, 0, 0, 0.5);
+}
+
+/* Pressed PLAY AGAIN while waiting for friend */
+.big-btn.pressed {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 @keyframes pop-in {
   from {
     transform: scale(0.5);
@@ -209,12 +341,25 @@ body {
   }
 }
 
+#friend-ready-chip {
+  background: rgba(105, 240, 174, 0.18);
+  color: #69f0ae;
+  border: 1px solid rgba(105, 240, 174, 0.4);
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-weight: 800;
+  font-size: 0.85rem;
+  opacity: 0.75;
+  animation: pop-in 0.25s;
+}
+
 #cam-hint {
   font-weight: 800;
   color: #ffe082;
   font-size: 1rem;
   animation: pulse-soft 1.2s infinite;
   text-align: center;
+  max-width: 80vw;
 }
 
 @keyframes pulse-soft {
@@ -245,41 +390,68 @@ body {
 }
 
 /* ============ Score ============ */
-#score-display {
+.score-wrap {
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
   z-index: 6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.score-wrap.raised {
+  top: 22%;
+}
+
+.score-num {
   font-family: 'Titan One', sans-serif;
-  font-size: clamp(4.5rem, 26vw, 8rem);
+  font-size: clamp(3.4rem, 20vw, 7rem);
   color: #fff;
   -webkit-text-stroke: 3px #12151c;
   text-shadow: 0 6px 0 rgba(0, 0, 0, 0.4), 0 0 40px rgba(255, 255, 255, 0.35);
+  line-height: 1;
 }
 
-#score-display.final {
+/* In split-screen the numbers need to shrink */
+.split .score-num {
+  font-size: clamp(2.6rem, 13vw, 4.5rem);
+}
+
+.score-wrap.final .score-num {
   animation: score-slam 0.4s cubic-bezier(0.34, 1.8, 0.64, 1);
   color: #ffe082;
 }
 
-/* When result buttons appear, the score slides up so both stay visible */
-#score-display.raised {
-  top: 20%;
-  transition: top 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
-  animation: none;
-}
-
 @keyframes score-slam {
   0% {
-    transform: translate(-50%, -50%) scale(1.6);
+    transform: scale(1.6);
   }
   100% {
-    transform: translate(-50%, -50%) scale(1);
+    transform: scale(1);
   }
 }
 
-/* ============ Warnings ============ */
+.score-tag {
+  font-family: 'Titan One', sans-serif;
+  font-size: clamp(0.9rem, 4.5vw, 1.3rem);
+  letter-spacing: 0.03em;
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5);
+  white-space: nowrap;
+  opacity: 0;
+  transform: scale(0.6);
+}
+
+.score-wrap.final .score-tag {
+  opacity: 1;
+  transform: scale(1);
+  transition: opacity 0.25s, transform 0.25s cubic-bezier(0.34, 1.8, 0.64, 1);
+}
+
+/* ============ Warnings & toast ============ */
 #no-face-warning {
   position: absolute;
   bottom: max(16px, env(safe-area-inset-bottom));
@@ -293,6 +465,30 @@ body {
   font-size: 0.95rem;
   white-space: nowrap;
   animation: pulse-soft 0.8s infinite;
+}
+
+#toast {
+  position: absolute;
+  top: 52%;
+  left: 50%;
+  transform: translate(-50%, 0);
+  z-index: 50;
+  background: rgba(255, 255, 255, 0.95);
+  color: #12151c;
+  font-weight: 800;
+  font-size: 0.95rem;
+  padding: 10px 20px;
+  border-radius: 999px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  animation: toast-in 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  pointer-events: none;
+}
+
+@keyframes toast-in {
+  from {
+    transform: translate(-50%, 14px);
+    opacity: 0;
+  }
 }
 
 /* ============ Countdown overlay ============ */

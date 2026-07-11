@@ -12,6 +12,8 @@ export interface Tracker {
   /** Requests camera, attaches stream to the video element, starts detection. */
   start(video: HTMLVideoElement): Promise<void>;
   latest(): TrackResult;
+  /** The local camera (or mock) stream, for sharing over WebRTC. */
+  getStream(): MediaStream | null;
   stop(): void;
   /** Mock-only hint: expression the fake player drifts toward. Ignored by the real tracker. */
   setMockTarget(shape: Shape): void;
@@ -85,6 +87,10 @@ class MediaPipeTracker implements Tracker {
     return this.result;
   }
 
+  getStream(): MediaStream | null {
+    return this.stream;
+  }
+
   stop(): void {
     cancelAnimationFrame(this.raf);
     this.stream?.getTracks().forEach((t) => t.stop());
@@ -108,6 +114,7 @@ class MockTracker implements Tracker {
   private current: Shape = {};
   private canvas = document.createElement('canvas');
   private startTime = 0;
+  private stream: MediaStream | null = null;
 
   async start(video: HTMLVideoElement): Promise<void> {
     this.canvas.width = 480;
@@ -134,8 +141,13 @@ class MockTracker implements Tracker {
     };
     draw();
 
-    video.srcObject = this.canvas.captureStream(30);
+    this.stream = this.canvas.captureStream(30);
+    video.srcObject = this.stream;
     await video.play();
+  }
+
+  getStream(): MediaStream | null {
+    return this.stream;
   }
 
   latest(): TrackResult {

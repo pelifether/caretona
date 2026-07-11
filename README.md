@@ -19,6 +19,15 @@ mimic it with your own face in the front camera. At the flash, your face is froz
   parameters. No image assets, no licensing, and the pose you see is exactly the pose
   being scored.
 - **Cost** — static hosting only. No backend, no APIs, no inference servers.
+- **Multiplayer** — WebRTC peer-to-peer via [PeerJS](https://peerjs.com). The free public
+  broker is used for signaling only; video and game messages flow directly between the
+  two players. "INVITE FRIEND" generates a `?join=<room>` link; rounds are host-driven
+  (host picks the careta, both play simultaneously, scores are exchanged over the data
+  channel, and a ready-handshake gates the next round). Note: without a TURN relay,
+  a small fraction of restrictive-NAT pairs may fail to connect.
+- **Face styles** — the button at the bottom-left of the stage toggles between the emoji
+  toon face and a more human "2.5D" face. Both are procedural canvas renderings driven
+  by the same blendshape parameters, so every careta works identically in either style.
 
 ## Develop
 
@@ -31,6 +40,14 @@ npm run dev
   (useful on machines without a webcam, or for testing the full flow quickly).
 - Real camera requires HTTPS (or localhost).
 
+End-to-end tests (need Google Chrome installed; dev server running on :5199):
+
+```sh
+node scripts/solo-test.mjs   # solo round, face toggle, live bubble, BYE flow
+node scripts/mp-test.mjs     # full 2-player round over real WebRTC + cancel/disconnect
+node scripts/face-gallery.mjs # renders both face styles across poses for visual review
+```
+
 ## Build & deploy
 
 `npm run build` outputs a static site to `dist/`. Pushing to `main` auto-deploys to
@@ -38,6 +55,6 @@ GitHub Pages via `.github/workflows/deploy.yml`.
 
 ## Roadmap
 
-- [ ] Multiplayer ("INVITE FRIEND") — WebRTC data channel, both players mimic the same careta.
 - [ ] Sound effects & haptics.
 - [ ] Share card (frozen face + score) via the Web Share API.
+- [ ] Self-hosted signaling + TURN for stubborn NATs.

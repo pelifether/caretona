@@ -43,6 +43,25 @@ export function computeScore(player: Shape, target: Shape): number {
   return Math.round(100 * Math.pow(Math.max(0, 1 - err), CURVE));
 }
 
+export interface ScoreTag {
+  label: string;
+  color: string;
+}
+
+/** Verdict displayed above the final number. */
+export function scoreTag(score: number): ScoreTag {
+  if (score <= 0) return { label: 'No face found :(', color: '#9aa3b5' };
+  if (score < 10) return { label: 'Too far!', color: '#ff5252' };
+  if (score < 25) return { label: 'Was that a sneeze?', color: '#ff7043' };
+  if (score < 40) return { label: 'Warming up', color: '#ffb300' };
+  if (score < 55) return { label: 'Getting there!', color: '#ffe082' };
+  if (score < 70) return { label: 'Solid careta', color: '#aed581' };
+  if (score < 80) return { label: 'Impressive!', color: '#69f0ae' };
+  if (score < 90) return { label: 'Oscar-worthy', color: '#40c4ff' };
+  if (score < 100) return { label: 'Careta master', color: '#b388ff' };
+  return { label: 'Top 1%!', color: '#ffd700' };
+}
+
 /** Robust average of the sampled frames (element-wise median would be overkill). */
 export function averageShapes(samples: Shape[]): Shape {
   const out: Shape = {};
