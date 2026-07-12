@@ -1,6 +1,7 @@
 import './style.css';
 import { ReferenceFace, faceMeshPoints } from './referenceFace';
 import { CARETAS, randomCareta, type Careta } from './caretas';
+import { REAL_FACES } from './realFaces';
 import { createTracker } from './tracker';
 import { computeScore, averageShapes, scoreTag } from './scoring';
 import type { Shape } from './blendshapes';
@@ -52,10 +53,20 @@ const tracker = createTracker();
 // ------------------------------------------------------------------ state
 
 type Mode = 'solo' | 'host' | 'guest';
+
+/** What this round's reference is: an authored careta or a real photo. */
+interface RoundTarget {
+  shape: Shape;
+  careta: Careta | null;
+  photo: number | null;
+}
+
 let mode: Mode = 'solo';
 let session: Session | null = null;
 let hostHandle: HostHandle | null = null;
 let currentCareta: Careta | null = null;
+let lastPhoto = -1;
+let currentTarget: RoundTarget | null = null;
 let cameraReady = false;
 let selfReady = false;
 let friendReady = false;
@@ -105,7 +116,7 @@ styleBtn.addEventListener('click', async () => {
 
 if (new URLSearchParams(location.search).has('mock')) {
   // Test hook: pose the reference face directly (used by scripts/face-gallery.mjs).
-  (window as unknown as Record<string, unknown>).__setFacePose = async (style: 'toon' | 'human' | '3d', name: string) => {
+  (window as unknown as Record<string, unknown>).__setFacePose = async (style: 'toon' | 'human' | '3d' | 'photo', name: string) => {
     await refFace.setStyle(style);
     const careta = CARETAS.find((c) => c.name === name);
     refFace.setShape(careta ? careta.shape : {}, 200, !careta);
@@ -130,7 +141,7 @@ playBtn.addEventListener('click', () => {
 $('alone-btn').addEventListener('click', async () => {
   if (!(await ensureCamera())) return;
   hide(menu);
-  void beginRound(pickCareta());
+  void beginRound(pickTarget());
 });
 
 $('invite-btn').addEventListener('click', () => void startHosting());
@@ -139,7 +150,7 @@ inviteBtn2.addEventListener('click', () => void startHosting());
 againBtn.addEventListener('click', () => {
   if (mode === 'solo') {
     resetRoundUI();
-    void beginRound(pickCareta());
+    void beginRound(pickTarget());
   } else {
     selfReady = true;
     againBtn.classList.add('pressed');
@@ -255,7 +266,11 @@ function wireSession(): void {
   session.onMessage = (msg) => {
     if (msg.t === 'start') {
       resetRoundUI();
-      void beginRound(CARETAS[msg.careta]);
+      void beginRound(
+        msg.photo !== undefined
+          ? { shape: REAL_FACES[msg.photo].shape, careta: null, photo: msg.photo }
+          : { shape: CARETAS[msg.careta].shape, careta: CARETAS[msg.careta], photo: null },
+      );
     } else if (msg.t === 'score') {
       remoteResult = { v: msg.v, pts: msg.pts };
     } else if (msg.t === 'ready') {
@@ -280,10 +295,14 @@ function maybeStartNextMultiRound(): void {
 }
 
 function startNextMultiRound(): void {
-  const careta = pickCareta();
-  session?.send({ t: 'start', careta: CARETAS.indexOf(careta) });
+  const target = pickTarget();
+  session?.send({
+    t: 'start',
+    careta: target.careta ? CARETAS.indexOf(target.careta) : -1,
+    ...(target.photo !== null ? { photo: target.photo } : {}),
+  });
   resetRoundUI();
-  void beginRound(careta);
+  void beginRound(target);
 }
 
 function exitMultiplayer(): void {
@@ -340,9 +359,17 @@ async function shareLink(link: string): Promise<void> {
 
 // ------------------------------------------------------------------ round flow
 
-function pickCareta(): Careta {
+function pickTarget(): RoundTarget {
+  if (refFace.getStyle() === 'photo' && REAL_FACES.length > 0) {
+    let idx: number;
+    do {
+      idx = Math.floor(Math.random() * REAL_FACES.length);
+    } while (REAL_FACES.length > 1 && idx === lastPhoto);
+    lastPhoto = idx;
+    return { shape: REAL_FACES[idx].shape, careta: null, photo: idx };
+  }
   currentCareta = randomCareta(currentCareta ?? undefined);
-  return currentCareta;
+  return { shape: currentCareta.shape, careta: currentCareta, photo: null };
 }
 
 function resetRoundUI(): void {
@@ -368,14 +395,28 @@ function resetRoundUI(): void {
   paneFriend.classList.remove('winner');
 }
 
-async function beginRound(careta: Careta): Promise<void> {
+async function beginRound(target: RoundTarget): Promise<void> {
   const token = ++roundToken;
-  currentCareta = careta;
+  currentTarget = target;
   tracker.setMockTarget({});
 
-  caretaName.textContent = `“${careta.name}”`;
-  show(caretaName);
-  refFace.setShape(careta.shape, 2000, false);
+  if (target.photo !== null) {
+    // Photo rounds have no names; the roulette decelerates through the
+    // countdown and locks on the chosen face at GO.
+    hide(caretaName);
+    try {
+      await refFace.settlePhoto(target.photo, 3300);
+    } catch (err) {
+      console.error(err);
+      showToast('Could not load face photos');
+      return;
+    }
+    if (token !== roundToken) return;
+  } else {
+    caretaName.textContent = `“${target.careta!.name}”`;
+    show(caretaName);
+    refFace.setShape(target.shape, 2000, false);
+  }
 
   const ticks: Array<[string, string]> = [
     ['3', '#ff5252'],
@@ -401,8 +442,8 @@ async function beginRound(careta: Careta): Promise<void> {
 
 async function caretaPhase(token: number): Promise<void> {
   const DURATION = 6000;
-  const careta = currentCareta!;
-  tracker.setMockTarget(careta.shape);
+  const target = currentTarget!;
+  tracker.setMockTarget(target.shape);
 
   show(phaseTimer);
   phaseTimer.classList.remove('urgent');
@@ -449,7 +490,7 @@ async function caretaPhase(token: number): Promise<void> {
   const recent = samples.filter((s) => s.detected && end - s.time <= 600).map((s) => s.shape);
   const anyDetected = recent.length > 0 || finalResult.faceDetected;
   const playerShape = recent.length > 0 ? averageShapes(recent) : finalResult.shape;
-  const score = anyDetected ? computeScore(playerShape, careta.shape) : 0;
+  const score = anyDetected ? computeScore(playerShape, target.shape) : 0;
 
   if (mode !== 'solo') {
     session?.send({ t: 'score', v: score, pts: subsample(finalResult.landmarks) });
@@ -470,15 +511,15 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
   }
   if (token !== roundToken) return;
 
-  // --- Mesh scan
+  // --- Mesh scan (canvases must be visible BEFORE projecting: hidden = 0×0)
   const SCAN_MS = 1500;
-  const refPts = faceMeshPoints(refMesh.clientWidth, refMesh.clientHeight, refFace.getShape());
+  show(meshSelf);
+  if (multi) show(meshFriend);
+  const refPts = referencePoints();
   const selfPts = landmarks ? projectLandmarks(subsample(landmarks)!, meshSelf, video, true) : [];
   const friendPts = multi && remoteResult?.pts
     ? projectLandmarks(remoteResult.pts, meshFriend, camRemote, false)
     : [];
-  show(meshSelf);
-  if (multi) show(meshFriend);
 
   const scanStart = performance.now();
   await new Promise<void>((resolve) => {
@@ -579,6 +620,16 @@ function coverTransform(sw: number, sh: number, w: number, h: number) {
   return { scale, dx: (w - sw * scale) / 2, dy: (h - sh * scale) / 2 };
 }
 
+/** Scan points for the reference: real landmarks on photo rounds, synthetic otherwise. */
+function referencePoints(): Array<[number, number]> {
+  const photo = currentTarget?.photo ?? null;
+  if (photo !== null) {
+    const { x, y, size } = refFace.photoRect();
+    return REAL_FACES[photo].pts.map(([nx, ny]) => [x + nx * size, y + ny * size]);
+  }
+  return faceMeshPoints(refMesh.clientWidth, refMesh.clientHeight, refFace.getShape());
+}
+
 function subsample(landmarks: Array<[number, number]> | null): Array<[number, number]> | null {
   if (!landmarks) return null;
   const step = Math.max(1, Math.floor(landmarks.length / 80));
@@ -655,6 +706,9 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
 }
 
 function freezeVideoFrame(videoEl: HTMLVideoElement, canvas: HTMLCanvasElement, mirror: boolean): void {
+  // Unhide BEFORE measuring: a display:none canvas reports 0×0 and the
+  // frozen frame would silently come out blank (black rectangle bug).
+  show(canvas);
   const ctx = sizeCanvas(canvas);
   const w = canvas.clientWidth, h = canvas.clientHeight;
   const sw = videoEl.videoWidth || 480, sh = videoEl.videoHeight || 640;
@@ -668,5 +722,4 @@ function freezeVideoFrame(videoEl: HTMLVideoElement, canvas: HTMLCanvasElement, 
     ctx.drawImage(videoEl, dx, dy, sw * scale, sh * scale);
   } catch { /* remote stream may not have a frame yet */ }
   ctx.restore();
-  show(canvas);
 }

@@ -38,11 +38,54 @@ ok(await page.$eval('#cam', (v) => v.classList.contains('bubble')), 'live bubble
 ok(await page.isVisible('#invite-btn-2'), 'solo results show INVITE FRIEND');
 ok(await page.isHidden('#bye-btn'), 'solo results hide BYE FRIEND');
 
+// The frozen flash-frame must actually contain the player image (regression:
+// canvas was sized while display:none and stayed blank/black).
+const freezePixels = await page.$eval('#freeze-self', (c) => {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 0; i < d.length; i += 4) if (d[i + 3] > 0 && (d[i] > 8 || d[i + 1] > 8 || d[i + 2] > 8)) n++;
+  return { total: c.width * c.height, lit: n };
+});
+ok(freezePixels.lit > freezePixels.total * 0.5, `frozen frame has real image content (${freezePixels.lit}/${freezePixels.total} lit px)`);
+
 // Play again resets
 await page.click('#again-btn');
 await page.waitForTimeout(500);
 ok(await page.$eval('#cam', (v) => !v.classList.contains('bubble')), 'bubble removed on new round');
 ok(await page.isVisible('#countdown'), 'new round countdown started');
+
+// ---- Photo mode ("real faces") round
+console.log('--- Photo mode ---');
+await page.waitForSelector('#result-menu:not(.hidden)', { timeout: 25000 }); // let round 2 finish
+await page.evaluate(() => window.__setFacePose('photo', 'neutral'));
+await page.waitForTimeout(700);
+const idx1 = await page.evaluate(() => new Promise((res) => {
+  // Sample the canvas twice to confirm the roulette is cycling
+  const c = document.getElementById('ref-canvas');
+  const snap = () => c.getContext('2d').getImageData(c.width / 2 | 0, c.height / 2 | 0, 1, 1).data.join(',');
+  const a = snap();
+  setTimeout(() => res([a, snap()]), 400);
+}));
+ok(idx1[0] !== idx1[1], 'idle roulette is cycling photos');
+await page.screenshot({ path: 'scripts/shots/7-photo-menu.png' });
+
+await page.click('#again-btn');
+await page.waitForSelector('#phase-timer:not(.hidden)', { timeout: 20000 });
+ok(await page.isHidden('#careta-name'), 'photo round shows no careta name');
+await page.screenshot({ path: 'scripts/shots/8-photo-careta.png' });
+const settled = await page.evaluate(() => new Promise((res) => {
+  const c = document.getElementById('ref-canvas');
+  const snap = () => c.getContext('2d').getImageData(c.width / 2 | 0, c.height / 2 | 0, 1, 1).data.join(',');
+  const a = snap();
+  setTimeout(() => res([a, snap()]), 500);
+}));
+ok(settled[0] === settled[1], 'photo locked (no cycling) during careta phase');
+
+await page.waitForSelector('#result-menu:not(.hidden)', { timeout: 25000 });
+const pScore = await page.textContent('#score-self .score-num');
+const pTag = await page.textContent('#score-self .score-tag');
+ok(/^\d+$/.test(pScore), `photo round score shown (${pScore}, "${pTag}")`);
+await page.screenshot({ path: 'scripts/shots/9-photo-results.png' });
 
 // ---- BYE FRIEND flow (host + guest, guest says bye)
 await page.close();

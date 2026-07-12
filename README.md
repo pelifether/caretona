@@ -25,14 +25,23 @@ mimic it with your own face in the front camera. At the flash, your face is froz
   (host picks the careta, both play simultaneously, scores are exchanged over the data
   channel, and a ready-handshake gates the next round). Note: without a TURN relay,
   a small fraction of restrictive-NAT pairs may fail to connect.
-- **Face styles** — the button at the bottom-left of the stage cycles through three
-  reference faces: the emoji toon, a procedural "2.5D" human (both plain canvas), and a
-  **true-3D photoscanned head** rendered with three.js. The 3D head ships with all 52
-  ARKit morph targets — the exact vocabulary the caretas are authored in — so every pose
-  drives it natively. The 3D bundle (~900 kB gzipped: three.js chunk, model, texture
-  transcoder) is lazy-loaded only the first time you switch to it and cached after;
-  the base game payload is unchanged. Head-scan sample model from the
+- **Face styles** — the button at the bottom-left of the stage cycles through four
+  reference faces: the emoji toon, a procedural "2.5D" human (both plain canvas), a
+  **true-3D photoscanned head** rendered with three.js, and **real photos**. The 3D head
+  ships with all 52 ARKit morph targets — the exact vocabulary the caretas are authored
+  in — so every pose drives it natively. The 3D bundle (~900 kB gzipped: three.js chunk,
+  model, texture transcoder) is lazy-loaded only the first time you switch to it and
+  cached after; the base game payload is unchanged. Head-scan sample model from the
   [Face Cap](https://bannaflak.com/face-cap/) app, via the three.js examples.
+- **Real-photo mode** — `scripts/prep-faces.mjs` preprocesses a folder of photos at
+  build time: it runs the same MediaPipe Face Landmarker on each image, extracts the
+  52 blendshape coefficients (the photo's scoring target, in exactly the space the
+  player is measured in), stores subsampled landmarks for the mesh-scan overlay, and
+  writes a normalized 512 px square face crop to `public/faces/`. In-game the idle
+  state is a fast photo roulette that decelerates through the countdown, slot-machine
+  style, and locks on the round's face at GO. Photo rounds have no careta names.
+  Caveat: targets extracted from uncontrolled photos (lighting, head pose) are noisier
+  than the hand-authored careta vectors, so photo-round scoring is slightly less exact.
 
 ## Develop
 
@@ -52,6 +61,7 @@ node scripts/solo-test.mjs    # solo round, face toggle, live bubble, BYE flow
 node scripts/mp-test.mjs      # full 2-player round over real WebRTC + cancel/disconnect
 node scripts/face-gallery.mjs # renders all face styles across poses for visual review
 node scripts/perf-test.mjs    # per-style FPS, 3D payload/load time, solo round in 3D
+node scripts/prep-faces.mjs "/path/to/photos"  # regenerate real-photo mode assets
 ```
 
 ## Build & deploy

@@ -73,7 +73,10 @@ const guestFriend = await guest.page.textContent('#score-friend .score-num');
 ok(hostSelf === guestFriend, `scores consistent across peers (${hostSelf} = ${guestFriend})`);
 
 // ---------------------------------------------------------------- ready handshake
-console.log('--- Ready handshake ---');
+// Round 2 is a PHOTO round: host switches style, guest stays on toon and must
+// still receive and render the same photo (protocol carries the photo index).
+console.log('--- Ready handshake (photo round) ---');
+await host.page.evaluate(() => window.__setFacePose('photo', 'neutral'));
 await host.page.click('#again-btn');
 await guest.page.waitForSelector('#friend-ready-chip:not(.hidden)', { timeout: 8000 });
 ok(true, 'guest sees "friend is ready" chip');
@@ -83,6 +86,19 @@ await guest.page.click('#again-btn');
 await host.page.waitForSelector('#countdown:not(.hidden)', { timeout: 10000 });
 await guest.page.waitForSelector('#countdown:not(.hidden)', { timeout: 10000 });
 ok(true, 'both players started round 2');
+
+await host.page.waitForSelector('#phase-timer:not(.hidden)', { timeout: 15000 });
+await guest.page.waitForSelector('#phase-timer:not(.hidden)', { timeout: 10000 });
+ok(await host.page.isHidden('#careta-name'), 'host photo round hides careta name');
+ok(await guest.page.isHidden('#careta-name'), 'guest photo round hides careta name');
+// Both canvases must show the SAME photo (center pixel comparison)
+const [hostPx, guestPx] = await Promise.all([host.page, guest.page].map((p) =>
+  p.$eval('#ref-canvas', (c) => {
+    const d = c.getContext('2d').getImageData(c.width / 2 | 0, c.height / 2 | 0, 1, 1).data;
+    return [d[0], d[1], d[2]].join(',');
+  }),
+));
+ok(hostPx === guestPx, `host and guest show the same photo (px ${hostPx} = ${guestPx})`);
 
 // ---------------------------------------------------------------- disconnect mid-game
 console.log('--- Disconnect handling ---');

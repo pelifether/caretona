@@ -8,7 +8,7 @@ import type { DataConnection, MediaConnection } from 'peerjs';
  */
 
 export type NetMessage =
-  | { t: 'start'; careta: number }
+  | { t: 'start'; careta: number; photo?: number }
   | { t: 'score'; v: number; pts: Array<[number, number]> | null }
   | { t: 'ready' }
   | { t: 'bye' }

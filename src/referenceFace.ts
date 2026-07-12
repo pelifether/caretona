@@ -2,6 +2,7 @@ import type { Shape } from './blendshapes';
 import { get, lerpShape } from './blendshapes';
 import { drawToonFace } from './faces/toon';
 import { drawHumanFace } from './faces/human';
+import { REAL_FACES } from './realFaces';
 import type { Avatar3D } from './faces/avatar3d';
 
 export interface FacePose {
@@ -10,14 +11,14 @@ export interface FacePose {
   gazeY: number;
 }
 
-export type FaceStyle = 'toon' | 'human' | '3d';
+export type FaceStyle = 'toon' | 'human' | '3d' | 'photo';
 
-const STYLE_ORDER: FaceStyle[] = ['toon', 'human', '3d'];
+const STYLE_ORDER: FaceStyle[] = ['toon', 'human', '3d', 'photo'];
 const STYLE_KEY = 'caretona-face-style';
 
 export function loadFaceStyle(): FaceStyle {
   const v = localStorage.getItem(STYLE_KEY);
-  return v === 'human' || v === '3d' ? v : 'toon';
+  return v === 'human' || v === '3d' || v === 'photo' ? v : 'toon';
 }
 
 export function saveFaceStyle(style: FaceStyle): void {
@@ -55,6 +56,15 @@ export class ReferenceFace {
   private style: FaceStyle = loadFaceStyle();
   private avatar: Avatar3D | null = null;
   private avatarLoading: Promise<Avatar3D> | null = null;
+  private photos: HTMLImageElement[] | null = null;
+  private photosLoading: Promise<void> | null = null;
+  private photoIdx = 0;
+  private nextFlip = 0;
+  /** A photo round is in progress: photos render regardless of style. */
+  private photoRound = false;
+  private settleTarget = -1;
+  private settleStart = 0;
+  private settleDur = 0;
   private current: Shape = {};
   private from: Shape = {};
   private target: Shape = {};
@@ -73,18 +83,34 @@ export class ReferenceFace {
     this.ctx = canvas.getContext('2d')!;
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
-    // If 3D was the saved style, load it in the background; the 2D toon
-    // face fills in until the avatar is ready.
+    // If 3D/photo was the saved style, load in the background; the 2D toon
+    // face fills in until assets are ready.
     if (this.style === '3d') this.ensureAvatar().catch(() => { this.style = 'toon'; });
+    if (this.style === 'photo') this.ensurePhotos().catch(() => { this.style = 'toon'; });
   }
 
   /** Animate to a shape over `dur` ms; idle life disabled unless `idle`. */
   setShape(shape: Shape, dur = 0, idle = false): void {
+    this.photoRound = false;
+    this.settleTarget = -1;
     this.from = { ...this.current };
     this.target = shape;
     this.transStart = performance.now();
     this.transDur = dur;
     this.idle = idle;
+  }
+
+  /**
+   * Photo round: slot-machine roulette that decelerates over `durMs`
+   * (the countdown) and lands on photo `idx`. Resolves once images exist.
+   */
+  async settlePhoto(idx: number, durMs: number): Promise<void> {
+    await this.ensurePhotos();
+    this.photoRound = true;
+    this.idle = false;
+    this.settleTarget = idx;
+    this.settleStart = performance.now();
+    this.settleDur = durMs;
   }
 
   getShape(): Shape {
@@ -95,9 +121,10 @@ export class ReferenceFace {
     return this.style;
   }
 
-  /** Resolves when the style is active (3D may need to load ~600 kB once). */
+  /** Resolves when the style is active (3D/photo assets load once). */
   async setStyle(style: FaceStyle): Promise<void> {
     if (style === '3d') await this.ensureAvatar();
+    if (style === 'photo') await this.ensurePhotos();
     this.style = style;
     saveFaceStyle(style);
     this.syncCanvases();
@@ -125,10 +152,85 @@ export class ReferenceFace {
     return this.avatarLoading;
   }
 
+  private ensurePhotos(): Promise<void> {
+    if (this.photos) return Promise.resolve();
+    this.photosLoading ??= Promise.all(
+      REAL_FACES.map((f) => {
+        const img = new Image();
+        img.src = `${import.meta.env.BASE_URL}faces/${f.img}`;
+        return img.decode().then(() => img);
+      }),
+    )
+      .then((imgs) => {
+        this.photos = imgs;
+        this.photoIdx = Math.floor(Math.random() * imgs.length);
+        this.syncCanvases();
+      })
+      .catch((err) => {
+        this.photosLoading = null;
+        throw err;
+      });
+    return this.photosLoading;
+  }
+
+  private renderingPhotos(): boolean {
+    return (this.photoRound || this.style === 'photo') && this.photos !== null;
+  }
+
   private syncCanvases(): void {
-    const is3d = this.style === '3d' && this.avatar !== null;
+    const is3d = this.style === '3d' && this.avatar !== null && !this.photoRound;
     this.canvas.classList.toggle('hidden', is3d);
     this.avatar?.canvas.classList.toggle('hidden', !is3d);
+  }
+
+  /** Where the current photo is drawn on the canvas (contain-fit square). */
+  photoRect(): { x: number; y: number; size: number } {
+    const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
+    const size = Math.min(w, h) * 0.86;
+    // Slightly below center so the countdown digit clears the card.
+    return { x: (w - size) / 2, y: (h - size) / 2 + h * 0.04, size };
+  }
+
+  private drawPhotos(ctx: CanvasRenderingContext2D, now: number): void {
+    const photos = this.photos!;
+    if (this.settleTarget >= 0) {
+      // Slot-machine deceleration, guaranteed to land on the target.
+      const t = Math.min(1, (now - this.settleStart) / this.settleDur);
+      if (t >= 1) {
+        this.photoIdx = this.settleTarget;
+      } else if (now >= this.nextFlip) {
+        const interval = 90 + t * t * 520;
+        this.photoIdx = now + interval >= this.settleStart + this.settleDur
+          ? this.settleTarget
+          : (this.photoIdx + 1) % photos.length;
+        this.nextFlip = now + interval;
+      }
+    } else if (this.idle && now >= this.nextFlip) {
+      // Fast roulette while idling.
+      this.photoIdx = (this.photoIdx + 1) % photos.length;
+      this.nextFlip = now + 130;
+    }
+
+    const { x, y, size } = this.photoRect();
+    const r = size * 0.06;
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, r);
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.45)';
+    ctx.shadowBlur = size * 0.08;
+    ctx.shadowOffsetY = size * 0.02;
+    ctx.fillStyle = '#1d2330';
+    ctx.fill();
+    ctx.restore();
+    ctx.clip();
+    ctx.drawImage(photos[this.photoIdx], x, y, size, size);
+    ctx.restore();
+    ctx.lineWidth = Math.max(2, size * 0.012);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(x, y, size, size, r);
+    ctx.stroke();
   }
 
   private loop(now: number): void {
@@ -162,7 +264,7 @@ export class ReferenceFace {
     }
 
     const pose: FacePose = { shape, gazeX: this.gazeX, gazeY: this.gazeY };
-    if (this.style === '3d' && this.avatar) {
+    if (this.style === '3d' && this.avatar && !this.renderingPhotos()) {
       this.avatar.render(pose);
     } else {
       const { canvas, ctx } = this;
@@ -175,7 +277,8 @@ export class ReferenceFace {
         }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
-        if (this.style === 'human') drawHumanFace(ctx, w, h, pose);
+        if (this.renderingPhotos()) this.drawPhotos(ctx, now);
+        else if (this.style === 'human') drawHumanFace(ctx, w, h, pose);
         else drawToonFace(ctx, w, h, pose);
       }
     }
