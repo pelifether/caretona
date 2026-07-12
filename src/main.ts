@@ -89,12 +89,24 @@ for (const btn of document.querySelectorAll<HTMLButtonElement>('.close-popup')) 
   btn.addEventListener('click', () => (btn.closest('dialog') as HTMLDialogElement).close());
 }
 
-$('style-btn').addEventListener('click', () => refFace.toggleStyle());
+const styleBtn = $('style-btn');
+styleBtn.addEventListener('click', async () => {
+  if (styleBtn.classList.contains('loading')) return;
+  styleBtn.classList.add('loading');
+  try {
+    await refFace.toggleStyle();
+  } catch (err) {
+    console.error(err);
+    showToast('3D face failed to load — check your connection');
+  } finally {
+    styleBtn.classList.remove('loading');
+  }
+});
 
 if (new URLSearchParams(location.search).has('mock')) {
   // Test hook: pose the reference face directly (used by scripts/face-gallery.mjs).
-  (window as unknown as Record<string, unknown>).__setFacePose = (style: string, name: string) => {
-    while (refFace.getStyle() !== style) refFace.toggleStyle();
+  (window as unknown as Record<string, unknown>).__setFacePose = async (style: 'toon' | 'human' | '3d', name: string) => {
+    await refFace.setStyle(style);
     const careta = CARETAS.find((c) => c.name === name);
     refFace.setShape(careta ? careta.shape : {}, 200, !careta);
   };

@@ -2,6 +2,7 @@ import type { Shape } from './blendshapes';
 import { get, lerpShape } from './blendshapes';
 import { drawToonFace } from './faces/toon';
 import { drawHumanFace } from './faces/human';
+import type { Avatar3D } from './faces/avatar3d';
 
 export interface FacePose {
   shape: Shape;
@@ -9,12 +10,14 @@ export interface FacePose {
   gazeY: number;
 }
 
-export type FaceStyle = 'toon' | 'human';
+export type FaceStyle = 'toon' | 'human' | '3d';
 
+const STYLE_ORDER: FaceStyle[] = ['toon', 'human', '3d'];
 const STYLE_KEY = 'caretona-face-style';
 
 export function loadFaceStyle(): FaceStyle {
-  return localStorage.getItem(STYLE_KEY) === 'human' ? 'human' : 'toon';
+  const v = localStorage.getItem(STYLE_KEY);
+  return v === 'human' || v === '3d' ? v : 'toon';
 }
 
 export function saveFaceStyle(style: FaceStyle): void {
@@ -50,6 +53,8 @@ export class ReferenceFace {
   private canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private style: FaceStyle = loadFaceStyle();
+  private avatar: Avatar3D | null = null;
+  private avatarLoading: Promise<Avatar3D> | null = null;
   private current: Shape = {};
   private from: Shape = {};
   private target: Shape = {};
@@ -68,6 +73,9 @@ export class ReferenceFace {
     this.ctx = canvas.getContext('2d')!;
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
+    // If 3D was the saved style, load it in the background; the 2D toon
+    // face fills in until the avatar is ready.
+    if (this.style === '3d') this.ensureAvatar().catch(() => { this.style = 'toon'; });
   }
 
   /** Animate to a shape over `dur` ms; idle life disabled unless `idle`. */
@@ -87,24 +95,43 @@ export class ReferenceFace {
     return this.style;
   }
 
-  toggleStyle(): FaceStyle {
-    this.style = this.style === 'toon' ? 'human' : 'toon';
-    saveFaceStyle(this.style);
-    return this.style;
+  /** Resolves when the style is active (3D may need to load ~600 kB once). */
+  async setStyle(style: FaceStyle): Promise<void> {
+    if (style === '3d') await this.ensureAvatar();
+    this.style = style;
+    saveFaceStyle(style);
+    this.syncCanvases();
+  }
+
+  async toggleStyle(): Promise<FaceStyle> {
+    const next = STYLE_ORDER[(STYLE_ORDER.indexOf(this.style) + 1) % STYLE_ORDER.length];
+    await this.setStyle(next);
+    return next;
+  }
+
+  private ensureAvatar(): Promise<Avatar3D> {
+    if (this.avatar) return Promise.resolve(this.avatar);
+    this.avatarLoading ??= import('./faces/avatar3d')
+      .then((m) => m.Avatar3D.create(this.canvas.parentElement!))
+      .then((avatar) => {
+        this.avatar = avatar;
+        this.syncCanvases();
+        return avatar;
+      })
+      .catch((err) => {
+        this.avatarLoading = null;
+        throw err;
+      });
+    return this.avatarLoading;
+  }
+
+  private syncCanvases(): void {
+    const is3d = this.style === '3d' && this.avatar !== null;
+    this.canvas.classList.toggle('hidden', is3d);
+    this.avatar?.canvas.classList.toggle('hidden', !is3d);
   }
 
   private loop(now: number): void {
-    const { canvas, ctx } = this;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = canvas.clientWidth, h = canvas.clientHeight;
-    if (w === 0 || h === 0) { this.raf = requestAnimationFrame(this.loop); return; }
-    if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
-      canvas.width = w * dpr;
-      canvas.height = h * dpr;
-    }
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, w, h);
-
     const t = this.transDur > 0 ? Math.min(1, (now - this.transStart) / this.transDur) : 1;
     const eased = 1 - Math.pow(1 - t, 3);
     this.current = lerpShape(this.from, this.target, eased);
@@ -135,8 +162,23 @@ export class ReferenceFace {
     }
 
     const pose: FacePose = { shape, gazeX: this.gazeX, gazeY: this.gazeY };
-    if (this.style === 'human') drawHumanFace(ctx, w, h, pose);
-    else drawToonFace(ctx, w, h, pose);
+    if (this.style === '3d' && this.avatar) {
+      this.avatar.render(pose);
+    } else {
+      const { canvas, ctx } = this;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (w > 0 && h > 0) {
+        if (canvas.width !== w * dpr || canvas.height !== h * dpr) {
+          canvas.width = w * dpr;
+          canvas.height = h * dpr;
+        }
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, w, h);
+        if (this.style === 'human') drawHumanFace(ctx, w, h, pose);
+        else drawToonFace(ctx, w, h, pose);
+      }
+    }
     this.raf = requestAnimationFrame(this.loop);
   }
 
