@@ -42,6 +42,11 @@ mimic it with your own face in the front camera. At the flash, your face is froz
   style, and locks on the round's face at GO. Photo rounds have no careta names.
   Caveat: targets extracted from uncontrolled photos (lighting, head pose) are noisier
   than the hand-authored careta vectors, so photo-round scoring is slightly less exact.
+- **High score** — the local record lives in `localStorage` and is always shown at the
+  bottom-left once earned. Beating it fires a confetti burst, and a "trophy card"
+  (reference snapshot + the player's frozen careta + date) is saved in the background;
+  tapping the record opens the card. In multiplayer, the winning pane flashes green
+  from the borders inward (yellow on both for a tie).
 
 ## Develop
 

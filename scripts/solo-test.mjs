@@ -66,11 +66,24 @@ ok(await page.isVisible('#high-score'), 'high score shown at results');
 const hs = await page.textContent('#high-score .hs-num');
 ok(hs === score, `high score equals first score (${hs})`);
 
+// Trophy card: tapping the record opens the card with both snapshots + date
+await page.click('#high-score');
+await page.waitForSelector('#hs-popup[open]', { timeout: 5000 });
+const refSrc = await page.getAttribute('#hs-ref', 'src');
+const selfSrc = await page.getAttribute('#hs-selfie', 'src');
+ok(refSrc?.startsWith('data:image/jpeg') && refSrc.length > 4000, `card ref snapshot saved (${refSrc?.length} chars)`);
+ok(selfSrc?.startsWith('data:image/jpeg') && selfSrc.length > 4000, `card selfie snapshot saved (${selfSrc?.length} chars)`);
+ok((await page.textContent('#hs-score-big')) === hs, 'card shows the record score');
+ok((await page.textContent('#hs-date')).length > 5, 'card shows the record date');
+await page.click('#hs-close');
+ok(await page.$eval('#hs-popup', (d) => !d.open), 'card closes via X');
+
 // Play again resets
 await page.click('#again-btn');
 await page.waitForTimeout(500);
 ok(await page.$eval('#cam', (v) => !v.classList.contains('bubble')), 'bubble removed on new round');
 ok(await page.isVisible('#countdown'), 'new round countdown started');
+ok(await page.isVisible('#high-score'), 'high score stays visible during new round');
 
 // ---- Photo mode ("real faces") round
 console.log('--- Photo mode ---');

@@ -97,23 +97,126 @@ function mpNotice(title: string, text: string, offerAlone = false): void {
 // ------------------------------------------------------------------ high score
 
 const HS_KEY = 'caretona-high-score';
+const HS_CARD_KEY = 'caretona-high-card';
 const highScoreEl = $('high-score');
 let highScore = Number(localStorage.getItem(HS_KEY)) || 0;
 
-/** Show the local record at results; celebrate when it's beaten. */
+interface HighCard { ref: string; self: string; date: number }
+
+function renderHighScore(): void {
+  if (highScore <= 0) return;
+  qs<HTMLElement>('#high-score .hs-num').textContent = String(highScore);
+  show(highScoreEl);
+}
+
+/** Update the record at results; celebrate + persist the trophy card when beaten. */
 function presentHighScore(score: number): void {
   const beaten = score > highScore;
   if (beaten) {
     highScore = score;
     localStorage.setItem(HS_KEY, String(highScore));
   }
-  qs<HTMLElement>('#high-score .hs-num').textContent = String(highScore);
-  show(highScoreEl);
+  renderHighScore();
   highScoreEl.classList.remove('pop');
   if (beaten) {
     void highScoreEl.offsetWidth; // restart animation
     highScoreEl.classList.add('pop');
+    confettiBurst(highScoreEl);
+    // Persist the trophy card off the critical path.
+    setTimeout(() => {
+      try {
+        const card: HighCard = {
+          ref: refFace.snapshot(480),
+          self: snapshotCanvas(freezeSelf, 480),
+          date: Date.now(),
+        };
+        localStorage.setItem(HS_CARD_KEY, JSON.stringify(card));
+      } catch (err) {
+        console.error('high-card save failed', err);
+      }
+    }, 0);
   }
+}
+
+function snapshotCanvas(src: HTMLCanvasElement, maxWidth: number): string {
+  const scale = Math.min(1, maxWidth / (src.width || 1));
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(src.width * scale));
+  out.height = Math.max(1, Math.round(src.height * scale));
+  const ctx = out.getContext('2d')!;
+  ctx.fillStyle = '#12151c';
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.drawImage(src, 0, 0, out.width, out.height);
+  return out.toDataURL('image/jpeg', 0.8);
+}
+
+highScoreEl.addEventListener('click', () => {
+  const raw = localStorage.getItem(HS_CARD_KEY);
+  if (!raw || highScore <= 0) return;
+  try {
+    const card: HighCard = JSON.parse(raw);
+    $<HTMLImageElement>('hs-ref').src = card.ref;
+    $<HTMLImageElement>('hs-selfie').src = card.self;
+    $('hs-score-big').textContent = String(highScore);
+    $('hs-date').textContent = new Date(card.date).toLocaleDateString(undefined, {
+      day: 'numeric', month: 'long', year: 'numeric',
+    });
+    $<HTMLDialogElement>('hs-popup').showModal();
+  } catch { /* corrupt card: ignore */ }
+});
+
+// ------------------------------------------------------------------ confetti
+
+/** Short one-shot confetti burst; the canvas exists only while animating. */
+function confettiBurst(originEl: HTMLElement): void {
+  const rect = originEl.getBoundingClientRect();
+  const ox = rect.left + rect.width / 2;
+  const oy = rect.top + rect.height / 2;
+  const canvas = document.createElement('canvas');
+  canvas.className = 'confetti';
+  canvas.width = innerWidth;
+  canvas.height = innerHeight;
+  document.body.appendChild(canvas);
+  const ctx = canvas.getContext('2d')!;
+
+  const COLORS = ['#ffd700', '#ff5252', '#40c4ff', '#69f0ae', '#ffb300', '#b388ff'];
+  const parts = Array.from({ length: 90 }, () => {
+    const angle = -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.1;
+    const speed = 4 + Math.random() * 8;
+    return {
+      x: ox, y: oy,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      w: 3 + Math.random() * 5,
+      h: 6 + Math.random() * 6,
+      rot: Math.random() * Math.PI,
+      vr: (Math.random() - 0.5) * 0.35,
+      color: COLORS[(Math.random() * COLORS.length) | 0],
+    };
+  });
+
+  const t0 = performance.now();
+  const DUR = 1600;
+  const tick = (now: number) => {
+    const t = (now - t0) / DUR;
+    if (t >= 1) { canvas.remove(); return; }
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.globalAlpha = t > 0.7 ? 1 - (t - 0.7) / 0.3 : 1;
+    for (const p of parts) {
+      p.vy += 0.22; // gravity
+      p.x += p.vx;
+      p.y += p.vy;
+      p.rot += p.vr;
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.rot);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+      ctx.restore();
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
 }
 
 // ------------------------------------------------------------------ static wiring
@@ -145,6 +248,8 @@ if (new URLSearchParams(location.search).has('mock')) {
     refFace.setShape(careta ? careta.shape : {}, 200, !careta);
   };
 }
+
+renderHighScore(); // record is always on screen once earned
 
 if (guestRoomId) {
   // Arriving through an invite link: PLAY becomes JOIN.
@@ -352,8 +457,8 @@ function exitMultiplayer(): void {
   bottomHalf.classList.remove('split');
   hide(paneFriend);
   hide(waiting);
-  paneSelf.classList.remove('winner');
-  paneFriend.classList.remove('winner');
+  paneSelf.classList.remove('win-flash', 'tie-flash');
+  paneFriend.classList.remove('win-flash', 'tie-flash');
   hide(scoreFriend);
   hide(friendReadyChip);
 
@@ -412,7 +517,6 @@ function resetRoundUI(): void {
   selfReady = friendReady = false;
   remoteResult = null;
 
-  hide(highScoreEl);
   highScoreEl.classList.remove('pop');
   for (const wrap of [scoreSelf, scoreFriend]) {
     hide(wrap);
@@ -424,8 +528,8 @@ function resetRoundUI(): void {
   }
   video.classList.remove('bubble');
   camRemote.classList.remove('bubble');
-  paneSelf.classList.remove('winner');
-  paneFriend.classList.remove('winner');
+  paneSelf.classList.remove('win-flash', 'tie-flash');
+  paneFriend.classList.remove('win-flash', 'tie-flash');
 }
 
 async function beginRound(target: RoundTarget): Promise<void> {
@@ -601,8 +705,11 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
   finalizeScore(scoreSelf, score);
   if (multi) {
     finalizeScore(scoreFriend, friendScore);
-    if (score !== friendScore) {
-      (score > friendScore ? paneSelf : paneFriend).classList.add('winner');
+    if (score === friendScore) {
+      paneSelf.classList.add('tie-flash');
+      paneFriend.classList.add('tie-flash');
+    } else {
+      (score > friendScore ? paneSelf : paneFriend).classList.add('win-flash');
     }
   }
 

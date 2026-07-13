@@ -76,6 +76,7 @@ export class ReferenceFace {
   private gazeTargetX = 0; private gazeTargetY = 0;
   private nextGaze = 0;
   private raf = 0;
+  private lastPose: FacePose = { shape: {}, gazeX: 0, gazeY: 0 };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -186,6 +187,38 @@ export class ReferenceFace {
     this.avatar?.canvas.classList.toggle('hidden', !is3d);
   }
 
+  /**
+   * JPEG snapshot of the reference as currently displayed. For the 3D head
+   * we must re-render in the same task: WebGL buffers read blank otherwise.
+   */
+  snapshot(maxWidth = 480): string {
+    const using3d = this.style === '3d' && this.avatar !== null && !this.renderingPhotos();
+    let src: HTMLCanvasElement;
+    if (using3d) {
+      this.avatar!.render(this.lastPose);
+      src = this.avatar!.canvas;
+    } else {
+      src = this.canvas;
+    }
+    const scale = Math.min(1, maxWidth / (src.width || 1));
+    const out = document.createElement('canvas');
+    out.width = Math.max(1, Math.round(src.width * scale));
+    out.height = Math.max(1, Math.round(src.height * scale));
+    const ctx = out.getContext('2d')!;
+    // Ref canvases are transparent; recreate the stage's blue backdrop.
+    const grad = ctx.createRadialGradient(
+      out.width / 2, out.height * 0.3, 0,
+      out.width / 2, out.height * 0.3, Math.max(out.width, out.height),
+    );
+    grad.addColorStop(0, '#4a7bd4');
+    grad.addColorStop(0.55, '#2c4a8f');
+    grad.addColorStop(1, '#1d3163');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, out.width, out.height);
+    ctx.drawImage(src, 0, 0, out.width, out.height);
+    return out.toDataURL('image/jpeg', 0.8);
+  }
+
   /** Where the current photo is drawn on the canvas (contain-fit square). */
   photoRect(): { x: number; y: number; size: number } {
     const w = this.canvas.clientWidth, h = this.canvas.clientHeight;
@@ -267,6 +300,7 @@ export class ReferenceFace {
     }
 
     const pose: FacePose = { shape, gazeX: this.gazeX, gazeY: this.gazeY };
+    this.lastPose = pose;
     if (this.style === '3d' && this.avatar && !this.renderingPhotos()) {
       this.avatar.render(pose);
     } else {

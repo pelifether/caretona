@@ -72,6 +72,22 @@ const hostSelf = await host.page.textContent('#score-self .score-num');
 const guestFriend = await guest.page.textContent('#score-friend .score-num');
 ok(hostSelf === guestFriend, `scores consistent across peers (${hostSelf} = ${guestFriend})`);
 
+// Winner flash: green on the higher pane, yellow on both when tied
+const hostFriend = await host.page.textContent('#score-friend .score-num');
+if (hostSelf === hostFriend) {
+  ok(
+    await host.page.$eval('#pane-self', (p) => p.classList.contains('tie-flash')) &&
+    await host.page.$eval('#pane-friend', (p) => p.classList.contains('tie-flash')),
+    `tie: both panes flash yellow (${hostSelf} = ${hostFriend})`,
+  );
+} else {
+  const winner = Number(hostSelf) > Number(hostFriend) ? '#pane-self' : '#pane-friend';
+  ok(
+    await host.page.$eval(winner, (p) => p.classList.contains('win-flash')),
+    `winner pane flashes green (${hostSelf} vs ${hostFriend})`,
+  );
+}
+
 // ---------------------------------------------------------------- ready handshake
 // Round 2 is a PHOTO round: host switches style, guest stays on toon and must
 // still receive and render the same photo (protocol carries the photo index).
