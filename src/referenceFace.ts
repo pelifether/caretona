@@ -1,7 +1,6 @@
 import type { Shape } from './blendshapes';
 import { get, lerpShape } from './blendshapes';
 import { drawToonFace } from './faces/toon';
-import { drawHumanFace } from './faces/human';
 import { REAL_FACES } from './realFaces';
 import type { Avatar3D } from './faces/avatar3d';
 
@@ -11,14 +10,14 @@ export interface FacePose {
   gazeY: number;
 }
 
-export type FaceStyle = 'toon' | 'human' | '3d' | 'photo';
+export type FaceStyle = '3d' | 'photo';
 
-const STYLE_ORDER: FaceStyle[] = ['toon', 'human', '3d', 'photo'];
+const STYLE_ORDER: FaceStyle[] = ['3d', 'photo'];
 const STYLE_KEY = 'caretona-face-style';
 
 export function loadFaceStyle(): FaceStyle {
   const v = localStorage.getItem(STYLE_KEY);
-  return v === 'human' || v === '3d' || v === 'photo' ? v : 'toon';
+  return v === 'photo' ? v : '3d'; // legacy toon/human values migrate to 3d
 }
 
 export function saveFaceStyle(style: FaceStyle): void {
@@ -83,10 +82,10 @@ export class ReferenceFace {
     this.ctx = canvas.getContext('2d')!;
     this.loop = this.loop.bind(this);
     this.raf = requestAnimationFrame(this.loop);
-    // If 3D/photo was the saved style, load in the background; the 2D toon
-    // face fills in until assets are ready.
-    if (this.style === '3d') this.ensureAvatar().catch(() => { this.style = 'toon'; });
-    if (this.style === 'photo') this.ensurePhotos().catch(() => { this.style = 'toon'; });
+    // Load the active style's assets in the background; the lightweight 2D
+    // toon placeholder fills in until they're ready (or if loading fails).
+    if (this.style === '3d') this.ensureAvatar().catch((e) => console.error(e));
+    if (this.style === 'photo') this.ensurePhotos().catch((e) => console.error(e));
   }
 
   /** Animate to a shape over `dur` ms; idle life disabled unless `idle`. */
@@ -98,6 +97,7 @@ export class ReferenceFace {
     this.transStart = performance.now();
     this.transDur = dur;
     this.idle = idle;
+    this.syncCanvases(); // photo round may have ended: restore the style's canvas
   }
 
   /**
@@ -111,6 +111,9 @@ export class ReferenceFace {
     this.settleTarget = idx;
     this.settleStart = performance.now();
     this.settleDur = durMs;
+    // Critical when the player's own style is 3D: the 2D canvas is hidden
+    // (display:none = 0x0, nothing rendered) until visibility is resynced.
+    this.syncCanvases();
   }
 
   getShape(): Shape {
@@ -278,8 +281,7 @@ export class ReferenceFace {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, w, h);
         if (this.renderingPhotos()) this.drawPhotos(ctx, now);
-        else if (this.style === 'human') drawHumanFace(ctx, w, h, pose);
-        else drawToonFace(ctx, w, h, pose);
+        else drawToonFace(ctx, w, h, pose); // placeholder while assets load
       }
     }
     this.raf = requestAnimationFrame(this.loop);

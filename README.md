@@ -25,14 +25,14 @@ mimic it with your own face in the front camera. At the flash, your face is froz
   (host picks the careta, both play simultaneously, scores are exchanged over the data
   channel, and a ready-handshake gates the next round). Note: without a TURN relay,
   a small fraction of restrictive-NAT pairs may fail to connect.
-- **Face styles** — the button at the bottom-left of the stage cycles through four
-  reference faces: the emoji toon, a procedural "2.5D" human (both plain canvas), a
-  **true-3D photoscanned head** rendered with three.js, and **real photos**. The 3D head
-  ships with all 52 ARKit morph targets — the exact vocabulary the caretas are authored
-  in — so every pose drives it natively. The 3D bundle (~900 kB gzipped: three.js chunk,
-  model, texture transcoder) is lazy-loaded only the first time you switch to it and
-  cached after; the base game payload is unchanged. Head-scan sample model from the
-  [Face Cap](https://bannaflak.com/face-cap/) app, via the three.js examples.
+- **Face styles** — the button at the bottom-left of the stage toggles between two
+  reference faces: a **true-3D photoscanned head** rendered with three.js (default),
+  and **real photos**. The 3D head ships with all 52 ARKit morph targets — the exact
+  vocabulary the caretas are authored in — so every pose drives it natively. The 3D
+  bundle (~900 kB gzipped: three.js chunk, model, texture transcoder) is lazy-loaded
+  and cached; a lightweight 2D toon placeholder renders while it loads. Head-scan
+  sample model from the [Face Cap](https://bannaflak.com/face-cap/) app, via the
+  three.js examples.
 - **Real-photo mode** — `scripts/prep-faces.mjs` preprocesses a folder of photos at
   build time: it runs the same MediaPipe Face Landmarker on each image, extracts the
   52 blendshape coefficients (the photo's scoring target, in exactly the space the
@@ -57,7 +57,7 @@ npm run dev
 End-to-end tests (need Google Chrome installed; dev server running on :5199):
 
 ```sh
-node scripts/solo-test.mjs    # solo round, face toggle, live bubble, BYE flow
+node scripts/solo-test.mjs    # solo round, face toggle, high score, live bubble, BYE flow
 node scripts/mp-test.mjs      # full 2-player round over real WebRTC + cancel/disconnect
 node scripts/face-gallery.mjs # renders all face styles across poses for visual review
 node scripts/perf-test.mjs    # per-style FPS, 3D payload/load time, solo round in 3D

@@ -9,10 +9,10 @@ await page.goto('http://localhost:5199/?mock=1');
 await page.waitForTimeout(500);
 
 const poses = ['neutral', 'The Scream', 'Stink Detector', 'The Kiss', 'Mega Grin'];
-for (const style of ['toon', 'human', '3d']) {
-  for (const pose of poses) {
+for (const style of ['3d', 'photo']) {
+  for (const pose of style === 'photo' ? ['neutral'] : poses) {
     await page.evaluate(([s, p]) => window.__setFacePose(s, p), [style, pose]);
-    await page.waitForTimeout(style === '3d' && pose === 'neutral' ? 4000 : 350);
+    await page.waitForTimeout(pose === 'neutral' ? 4000 : 350);
     const el = await page.$('#top-half');
     await el.screenshot({ path: `scripts/shots/face-${style}-${pose.replace(/\s/g, '')}.png` });
   }

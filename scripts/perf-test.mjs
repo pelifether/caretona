@@ -34,10 +34,8 @@ async function fps(label) {
   console.log(`${label}: ${v.toFixed(1)} fps`);
 }
 
-await page.evaluate(() => window.__setFacePose('toon', 'neutral'));
-await fps('toon  idle');
-await page.evaluate(() => window.__setFacePose('human', 'neutral'));
-await fps('human idle');
+await page.evaluate(() => window.__setFacePose('photo', 'neutral'));
+await fps('photo idle (roulette)');
 
 const t0 = Date.now();
 await page.evaluate(() => window.__setFacePose('3d', 'neutral'));

@@ -87,10 +87,33 @@ function showToast(msg: string, ms = 2200): void {
   setTimeout(() => hide(toast), ms);
 }
 
-function mpNotice(title: string, text: string): void {
+function mpNotice(title: string, text: string, offerAlone = false): void {
   $('mp-popup-title').textContent = title;
   $('mp-popup-text').textContent = text;
+  $('mp-alone-btn').classList.toggle('hidden', !offerAlone);
   if (!mpPopup.open) mpPopup.showModal();
+}
+
+// ------------------------------------------------------------------ high score
+
+const HS_KEY = 'caretona-high-score';
+const highScoreEl = $('high-score');
+let highScore = Number(localStorage.getItem(HS_KEY)) || 0;
+
+/** Show the local record at results; celebrate when it's beaten. */
+function presentHighScore(score: number): void {
+  const beaten = score > highScore;
+  if (beaten) {
+    highScore = score;
+    localStorage.setItem(HS_KEY, String(highScore));
+  }
+  qs<HTMLElement>('#high-score .hs-num').textContent = String(highScore);
+  show(highScoreEl);
+  highScoreEl.classList.remove('pop');
+  if (beaten) {
+    void highScoreEl.offsetWidth; // restart animation
+    highScoreEl.classList.add('pop');
+  }
 }
 
 // ------------------------------------------------------------------ static wiring
@@ -116,7 +139,7 @@ styleBtn.addEventListener('click', async () => {
 
 if (new URLSearchParams(location.search).has('mock')) {
   // Test hook: pose the reference face directly (used by scripts/face-gallery.mjs).
-  (window as unknown as Record<string, unknown>).__setFacePose = async (style: 'toon' | 'human' | '3d' | 'photo', name: string) => {
+  (window as unknown as Record<string, unknown>).__setFacePose = async (style: '3d' | 'photo', name: string) => {
     await refFace.setStyle(style);
     const careta = CARETAS.find((c) => c.name === name);
     refFace.setShape(careta ? careta.shape : {}, 200, !careta);
@@ -170,6 +193,14 @@ cancelInviteBtn.addEventListener('click', () => {
   hostHandle?.cancel();
   hostHandle = null;
   exitMultiplayer();
+});
+
+$('mp-alone-btn').addEventListener('click', async () => {
+  mpPopup.close();
+  if (!(await ensureCamera())) return;
+  hide(menu);
+  resetRoundUI();
+  void beginRound(pickTarget());
 });
 
 // ------------------------------------------------------------------ camera
@@ -248,7 +279,7 @@ async function joinAsGuest(roomId: string): Promise<void> {
     session = await joinRoom(roomId, tracker.getStream()!);
   } catch {
     exitMultiplayer();
-    mpNotice('This invite has been cancelled', 'Ask your friend for a fresh link!');
+    mpNotice('This invite has been cancelled', 'Ask your friend for a fresh link!', true);
     history.replaceState(null, '', location.pathname + (new URLSearchParams(location.search).has('mock') ? '?mock=1' : ''));
     return;
   }
@@ -345,7 +376,7 @@ function exitMultiplayer(): void {
 async function shareLink(link: string): Promise<void> {
   if (navigator.share) {
     try {
-      await navigator.share({ title: 'Caretona', text: 'Face-off with me! 😜', url: link });
+      await navigator.share({ title: 'Caretona', text: 'Duvido você ganhar de mim no jogo da Caretona 😜', url: link });
       return;
     } catch { /* fall through to clipboard */ }
   }
@@ -381,6 +412,8 @@ function resetRoundUI(): void {
   selfReady = friendReady = false;
   remoteResult = null;
 
+  hide(highScoreEl);
+  highScoreEl.classList.remove('pop');
   for (const wrap of [scoreSelf, scoreFriend]) {
     hide(wrap);
     wrap.classList.remove('final', 'raised');
@@ -534,6 +567,12 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
     };
     tick();
   });
+  // Scan done — remove every trace of the mesh overlays.
+  for (const c of [refMesh, meshSelf, meshFriend]) {
+    c.getContext('2d')?.clearRect(0, 0, c.width, c.height);
+  }
+  hide(meshSelf);
+  hide(meshFriend);
   if (token !== roundToken) return;
 
   // --- Count-up (2s, decelerating)
@@ -577,6 +616,7 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
   // Live cam bubbles over the frozen frames
   video.classList.add('bubble');
   if (multi) camRemote.classList.add('bubble');
+  presentHighScore(score);
 
   atResults = true;
   configureResultButtons();
@@ -661,8 +701,8 @@ function drawScan(canvas: HTMLCanvasElement, pts: Array<[number, number]>, progr
   if (pts.length === 0) return;
 
   const visible = Math.floor(pts.length * Math.min(1, progress * 1.15));
-  // Settle at a faint 30% so the "mapped" mesh stays visible during the count-up.
-  const fade = progress > 0.85 ? Math.max(0.3, 1 - ((progress - 0.85) / 0.15) * 0.7) : 1;
+  // Fade the mesh out completely by the end of the scan.
+  const fade = progress > 0.8 ? Math.max(0, 1 - (progress - 0.8) / 0.2) : 1;
 
   if (progress < 0.9) {
     const y = h * (progress / 0.9);

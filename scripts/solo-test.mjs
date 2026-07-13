@@ -13,19 +13,22 @@ page.on('pageerror', (e) => console.log(`[pageerror] ${e.message}`));
 
 await page.goto(`${BASE}/?mock=1`);
 await page.waitForTimeout(800);
-await page.screenshot({ path: 'scripts/shots/1-menu-toon.png' });
+await page.screenshot({ path: 'scripts/shots/1-menu-3d.png' });
 
-// Toggle to human face
+// Style toggle now cycles 3d <-> photo only
 await page.click('#style-btn');
-await page.waitForTimeout(600);
-await page.screenshot({ path: 'scripts/shots/2-menu-human.png' });
-ok(await page.evaluate(() => localStorage.getItem('caretona-face-style')) === 'human', 'style persisted');
+await page.waitForFunction(() => localStorage.getItem('caretona-face-style') === 'photo', null, { timeout: 15000 });
+ok(true, 'toggle 3d -> photo persisted');
+await page.click('#style-btn');
+await page.waitForFunction(() => localStorage.getItem('caretona-face-style') === '3d', null, { timeout: 20000 });
+ok(true, 'toggle photo -> 3d persisted');
+await page.screenshot({ path: 'scripts/shots/2-menu-3d.png' });
 
-// Solo round with human face
+// Solo round with the 3D face
 await page.click('#play-btn');
 await page.click('#alone-btn');
 await page.waitForTimeout(3900); // countdown done, careta phase, face stretched
-await page.screenshot({ path: 'scripts/shots/3-careta-human.png' });
+await page.screenshot({ path: 'scripts/shots/3-careta-3d.png' });
 
 await page.waitForSelector('#result-menu:not(.hidden)', { timeout: 25000 });
 await page.screenshot({ path: 'scripts/shots/4-results-solo.png' });
@@ -47,6 +50,21 @@ const freezePixels = await page.$eval('#freeze-self', (c) => {
   return { total: c.width * c.height, lit: n };
 });
 ok(freezePixels.lit > freezePixels.total * 0.5, `frozen frame has real image content (${freezePixels.lit}/${freezePixels.total} lit px)`);
+
+// Scan mesh must be fully gone at results (no residual dots/lines)
+ok(await page.isHidden('#mesh-self'), 'player scan mesh hidden at results');
+const refMeshLit = await page.$eval('#ref-mesh', (c) => {
+  const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+  return n;
+});
+ok(refMeshLit === 0, `reference scan mesh cleared (${refMeshLit} lit px)`);
+
+// High score: first round in a fresh profile, so record === score
+ok(await page.isVisible('#high-score'), 'high score shown at results');
+const hs = await page.textContent('#high-score .hs-num');
+ok(hs === score, `high score equals first score (${hs})`);
 
 // Play again resets
 await page.click('#again-btn');

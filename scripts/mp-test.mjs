@@ -126,6 +126,12 @@ await late.page.waitForSelector('#mp-popup[open]', { timeout: 30000 });
 const cancelTitle = await late.page.textContent('#mp-popup-title');
 ok(/cancelled/i.test(cancelTitle), `late guest sees cancelled popup ("${cancelTitle}")`);
 
+// The cancelled popup offers PLAY ALONE — clicking it starts a solo round
+ok(await late.page.isVisible('#mp-alone-btn'), 'cancelled popup offers PLAY ALONE');
+await late.page.click('#mp-alone-btn');
+await late.page.waitForSelector('#countdown:not(.hidden)', { timeout: 15000 });
+ok(true, 'late guest started a solo round from the popup');
+
 await host2.ctx.close();
 await late.ctx.close();
 await browser.close();
