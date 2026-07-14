@@ -46,6 +46,10 @@ const mpPopup = $<HTMLDialogElement>('mp-popup');
 
 const scoreSelf = $('score-self');
 const scoreFriend = $('score-friend');
+const pileSelf = $('pile-self');
+const pileFriend = $('pile-friend');
+const summarySelf = $('summary-self');
+const summaryFriend = $('summary-friend');
 
 const refFace = new ReferenceFace(refCanvas);
 const tracker = createTracker();
@@ -67,6 +71,23 @@ let hostHandle: HostHandle | null = null;
 let currentCareta: Careta | null = null;
 let lastPhoto = -1;
 let currentTarget: RoundTarget | null = null;
+
+// --- Multiplayer games: 5 consecutive rounds (solo rounds stay standalone).
+const urlParams = new URLSearchParams(location.search);
+const GAME_ROUNDS = urlParams.has('mock') && Number(urlParams.get('rounds')) > 0
+  ? Number(urlParams.get('rounds')) // test-only short games
+  : 5;
+let roundIndex = 0;
+let gameScoresSelf: number[] = [];
+let gameScoresFriend: number[] = [];
+let atGameEnd = false;
+
+function resetGame(): void {
+  roundIndex = 0;
+  gameScoresSelf = [];
+  gameScoresFriend = [];
+  atGameEnd = false;
+}
 let cameraReady = false;
 let selfReady = false;
 let friendReady = false;
@@ -158,7 +179,7 @@ highScoreEl.addEventListener('click', () => {
     $<HTMLImageElement>('hs-ref').src = card.ref;
     $<HTMLImageElement>('hs-selfie').src = card.self;
     $('hs-score-big').textContent = String(highScore);
-    $('hs-date').textContent = new Date(card.date).toLocaleDateString(undefined, {
+    $('hs-date').textContent = 'HIGH SCORE • ' + new Date(card.date).toLocaleDateString(undefined, {
       day: 'numeric', month: 'long', year: 'numeric',
     });
     $<HTMLDialogElement>('hs-popup').showModal();
@@ -339,6 +360,7 @@ async function startHosting(): Promise<void> {
   hide(caretaName);
 
   mode = 'host';
+  resetGame();
   bottomHalf.classList.add('split');
   show(paneFriend);
   waitingText.textContent = 'Waiting for friend…';
@@ -374,6 +396,7 @@ async function joinAsGuest(roomId: string): Promise<void> {
   resetRoundUI();
   hide(menu);
   mode = 'guest';
+  resetGame();
   bottomHalf.classList.add('split');
   show(paneFriend);
   waitingText.textContent = 'Connecting…';
@@ -401,6 +424,8 @@ function wireSession(): void {
   };
   session.onMessage = (msg) => {
     if (msg.t === 'start') {
+      if (msg.round !== undefined) roundIndex = msg.round;
+      if (roundIndex === 0) resetGame();
       resetRoundUI();
       void beginRound(
         msg.photo !== undefined
@@ -431,11 +456,13 @@ function maybeStartNextMultiRound(): void {
 }
 
 function startNextMultiRound(): void {
+  if (roundIndex >= GAME_ROUNDS) resetGame(); // PLAY AGAIN after a full game
   const target = pickTarget();
   session?.send({
     t: 'start',
     careta: target.careta ? CARETAS.indexOf(target.careta) : -1,
     ...(target.photo !== null ? { photo: target.photo } : {}),
+    round: roundIndex,
   });
   resetRoundUI();
   void beginRound(target);
@@ -451,6 +478,17 @@ function exitMultiplayer(): void {
   leavingIntentionally = false;
   remoteResult = null;
   selfReady = friendReady = false;
+  resetGame();
+  for (const el of [pileSelf, pileFriend, summarySelf, summaryFriend]) {
+    el.replaceChildren();
+    hide(el);
+  }
+  // If the friend left on the game-end screen, restore a sane solo results view.
+  resultMenu.classList.remove('at-bottom');
+  if (atResults && scoreSelf.classList.contains('hidden')) {
+    show(scoreSelf);
+    scoreSelf.classList.add('raised', 'final');
+  }
 
   camRemote.srcObject = null;
   camRemote.classList.remove('bubble');
@@ -513,6 +551,10 @@ function resetRoundUI(): void {
   againBtn.classList.remove('pressed');
   againBtn.textContent = 'PLAY AGAIN';
   hide(friendReadyChip);
+  for (const el of [pileSelf, pileFriend, summarySelf, summaryFriend]) {
+    el.replaceChildren();
+    hide(el);
+  }
   atResults = false;
   selfReady = friendReady = false;
   remoteResult = null;
@@ -703,13 +745,21 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
   if (token !== roundToken) return;
 
   finalizeScore(scoreSelf, score);
+  const gameDone = multi && roundIndex + 1 >= GAME_ROUNDS;
   if (multi) {
     finalizeScore(scoreFriend, friendScore);
-    if (score === friendScore) {
-      paneSelf.classList.add('tie-flash');
-      paneFriend.classList.add('tie-flash');
-    } else {
-      (score > friendScore ? paneSelf : paneFriend).classList.add('win-flash');
+    gameScoresSelf.push(score);
+    gameScoresFriend.push(friendScore);
+    roundIndex++;
+    atGameEnd = gameDone;
+    // On the final round the game-total flash is the payoff; skip the round one.
+    if (!gameDone) {
+      if (score === friendScore) {
+        paneSelf.classList.add('tie-flash');
+        paneFriend.classList.add('tie-flash');
+      } else {
+        (score > friendScore ? paneSelf : paneFriend).classList.add('win-flash');
+      }
     }
   }
 
@@ -725,16 +775,117 @@ async function scoringPhase(token: number, score: number, landmarks: Array<[numb
   if (multi) camRemote.classList.add('bubble');
   presentHighScore(score);
 
+  // Past rounds of this game pile up above each bubble (current one is the
+  // big number; it joins the pile at the next results screen).
+  if (multi) {
+    renderPile(pileSelf, gameScoresSelf.slice(0, -1));
+    renderPile(pileFriend, gameScoresFriend.slice(0, -1));
+  }
+
+  if (gameDone) {
+    await sleep(1100); // let the last round's score land
+    if (token !== roundToken) return;
+    await gameSummaryPhase(token);
+    if (token !== roundToken) return;
+  }
+
   atResults = true;
+  resultMenu.classList.toggle('at-bottom', gameDone);
   configureResultButtons();
   if (multi && friendReady) show(friendReadyChip);
   show(resultMenu);
+}
+
+function renderPile(el: HTMLElement, scores: number[]): void {
+  el.replaceChildren();
+  if (scores.length === 0) {
+    hide(el);
+    return;
+  }
+  for (const s of scores) {
+    const chip = document.createElement('div');
+    chip.className = 'chip';
+    chip.textContent = String(s);
+    el.append(chip); // column-reverse container: latest ends up on top
+  }
+  show(el);
+}
+
+/** End of a 5-round game: per-round rows, decelerating total, winner flash. */
+async function gameSummaryPhase(token: number): Promise<void> {
+  for (const wrap of [scoreSelf, scoreFriend]) {
+    hide(wrap);
+    wrap.classList.remove('raised', 'final');
+  }
+  hide(pileSelf);
+  hide(pileFriend);
+
+  const totalSelf = gameScoresSelf.reduce((a, b) => a + b, 0);
+  const totalFriend = gameScoresFriend.reduce((a, b) => a + b, 0);
+
+  const buildSummary = (el: HTMLElement, scores: number[]): HTMLElement => {
+    el.replaceChildren();
+    const total = document.createElement('div');
+    total.className = 'sum-total';
+    total.textContent = '0';
+    const rows = document.createElement('div');
+    rows.className = 'sum-rows';
+    scores.forEach((s, i) => {
+      const row = document.createElement('div');
+      row.className = 'sum-row';
+      row.style.animationDelay = `${i * 0.12}s`;
+      const label = document.createElement('span');
+      label.className = 'r';
+      label.textContent = `R${i + 1}`;
+      const value = document.createElement('span');
+      value.textContent = String(s);
+      row.append(label, value);
+      rows.append(row);
+    });
+    el.append(total, rows);
+    show(el);
+    return total;
+  };
+  const totalElSelf = buildSummary(summarySelf, gameScoresSelf);
+  const totalElFriend = buildSummary(summaryFriend, gameScoresFriend);
+
+  await sleep(gameScoresSelf.length * 120 + 300); // let the rows stagger in
+  if (token !== roundToken) return;
+
+  // Count up to the totals, fast at first and decelerating into the final sum.
+  const COUNT_MS = 2600;
+  const t0 = performance.now();
+  await new Promise<void>((resolve) => {
+    const tick = () => {
+      if (token !== roundToken) { resolve(); return; }
+      const t = Math.min(1, (performance.now() - t0) / COUNT_MS);
+      const eased = 1 - Math.pow(1 - t, 4);
+      totalElSelf.textContent = String(Math.round(totalSelf * eased));
+      totalElFriend.textContent = String(Math.round(totalFriend * eased));
+      if (t >= 1) { resolve(); return; }
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  if (token !== roundToken) return;
+
+  if (totalSelf === totalFriend) {
+    paneSelf.classList.add('tie-flash');
+    paneFriend.classList.add('tie-flash');
+  } else {
+    (totalSelf > totalFriend ? paneSelf : paneFriend).classList.add('win-flash');
+  }
+  await sleep(500);
 }
 
 function configureResultButtons(): void {
   const multi = mode !== 'solo';
   byeBtn.classList.toggle('hidden', !multi);
   inviteBtn2.classList.toggle('hidden', multi);
+  // Mid-game the button advances the game; at game end (or solo) it restarts.
+  const label = multi && !atGameEnd ? 'NEXT ROUND' : 'PLAY AGAIN';
+  if (!againBtn.classList.contains('pressed')) againBtn.textContent = label;
+  friendReadyChip.textContent = `✓ Friend pressed ${label}`;
 }
 
 function finalizeScore(wrap: HTMLElement, score: number): void {

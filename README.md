@@ -25,6 +25,11 @@ mimic it with your own face in the front camera. At the flash, your face is froz
   (host picks the careta, both play simultaneously, scores are exchanged over the data
   channel, and a ready-handshake gates the next round). Note: without a TURN relay,
   a small fraction of restrictive-NAT pairs may fail to connect.
+- **Games** — multiplayer rounds come in games of 5. Between rounds the button reads
+  NEXT ROUND and past round scores pile up above each player's cam bubble. After the
+  5th round an end-of-game screen lists every round, counts up each player's total
+  with decelerating speed, and flashes the winner's half green (yellow tie); PLAY
+  AGAIN then starts a fresh game via the same ready-handshake.
 - **Face styles** — the button at the bottom-left of the stage toggles between two
   reference faces: a **true-3D photoscanned head** rendered with three.js (default),
   and **real photos**. The 3D head ships with all 52 ARKit morph targets — the exact

@@ -8,7 +8,7 @@ import type { DataConnection, MediaConnection } from 'peerjs';
  */
 
 export type NetMessage =
-  | { t: 'start'; careta: number; photo?: number }
+  | { t: 'start'; careta: number; photo?: number; round?: number }
   | { t: 'score'; v: number; pts: Array<[number, number]> | null }
   | { t: 'ready' }
   | { t: 'bye' }
@@ -106,9 +106,11 @@ export async function hostRoom(localStream: MediaStream): Promise<HostHandle> {
   });
 
   const url = new URL(location.href);
+  const params = new URLSearchParams(location.search);
   url.search = '';
   url.searchParams.set('join', roomId);
-  if (new URLSearchParams(location.search).has('mock')) url.searchParams.set('mock', '1');
+  if (params.has('mock')) url.searchParams.set('mock', '1');
+  if (params.has('rounds')) url.searchParams.set('rounds', params.get('rounds')!); // test-only override
 
   let cancelled = false;
   const guest = new Promise<Session>((resolve) => {

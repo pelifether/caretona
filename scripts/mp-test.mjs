@@ -17,7 +17,7 @@ function ok(cond, label) {
 const browser = await chromium.launch({ channel: 'chrome', headless: true });
 
 async function newPlayer(name) {
-  const ctx = await browser.newContext();
+  const ctx = await browser.newContext({ viewport: { width: 390, height: 750 } });
   const page = await ctx.newPage();
   page.on('console', (m) => {
     if (m.type() === 'error') console.log(`[${name} console.error] ${m.text()}`);
@@ -150,6 +150,69 @@ ok(true, 'late guest started a solo round from the popup');
 
 await host2.ctx.close();
 await late.ctx.close();
+
+// ---------------------------------------------------------------- full game (short: 3 rounds)
+console.log('--- Full game flow (3-round test game) ---');
+const h3 = await newPlayer('host3');
+const g3 = await newPlayer('guest3');
+await h3.page.goto(`${BASE}/?mock=1&rounds=3`);
+await h3.page.click('#play-btn');
+await h3.page.click('#invite-btn');
+await h3.page.waitForFunction(() => window.__caretonaLink, null, { timeout: 20000 });
+const link3 = await h3.page.evaluate(() => window.__caretonaLink);
+ok(link3.includes('rounds=3'), 'invite link carries test rounds override');
+await g3.page.goto(link3);
+await g3.page.click('#play-btn');
+
+const bothNext = async () => {
+  await h3.page.click('#again-btn');
+  await g3.page.click('#again-btn');
+};
+
+// Round 1 results: NEXT ROUND label, no pile yet
+await h3.page.waitForSelector('#result-menu:not(.hidden)', { timeout: 40000 });
+await g3.page.waitForSelector('#result-menu:not(.hidden)', { timeout: 15000 });
+ok((await h3.page.textContent('#again-btn')).includes('NEXT ROUND'), 'mid-game button says NEXT ROUND');
+ok(await h3.page.isHidden('#pile-self'), 'no score pile at round 1 results');
+await bothNext();
+
+// Round 2 results: round-1 scores piled above both bubbles
+await h3.page.waitForSelector('#countdown:not(.hidden)', { timeout: 15000 });
+await h3.page.waitForSelector('#result-menu:not(.hidden)', { timeout: 40000 });
+ok(
+  (await h3.page.$$eval('#pile-self .chip', (c) => c.length)) === 1 &&
+  (await h3.page.$$eval('#pile-friend .chip', (c) => c.length)) === 1,
+  'round-1 scores piled above both bubbles at round 2 results',
+);
+await g3.page.waitForSelector('#result-menu:not(.hidden)', { timeout: 15000 });
+await bothNext();
+
+// Round 3 = game end: summary rows + decelerating totals + winner flash + PLAY AGAIN
+await h3.page.waitForSelector('#countdown:not(.hidden)', { timeout: 15000 });
+await h3.page.waitForSelector('#result-menu:not(.hidden)', { timeout: 60000 });
+ok(await h3.page.isVisible('#summary-self'), 'game summary shown on own pane');
+ok(await h3.page.isVisible('#summary-friend'), 'game summary shown on friend pane');
+const rows = await h3.page.$$eval('#summary-self .sum-row', (r) => r.map((x) => Number(x.lastChild.textContent)));
+const total = Number(await h3.page.textContent('#summary-self .sum-total'));
+ok(rows.length === 3, `summary lists every round (${rows.join('+')})`);
+ok(total === rows.reduce((a, b) => a + b, 0), `total equals the sum (${total})`);
+const friendTotal = Number(await h3.page.textContent('#summary-friend .sum-total'));
+const flashSel = total === friendTotal
+  ? await h3.page.$eval('#pane-self', (p) => p.classList.contains('tie-flash'))
+  : await h3.page.$eval(total > friendTotal ? '#pane-self' : '#pane-friend', (p) => p.classList.contains('win-flash'));
+ok(flashSel, `game winner pane flashed (${total} vs ${friendTotal})`);
+ok((await h3.page.textContent('#again-btn')).includes('PLAY AGAIN'), 'game-end button says PLAY AGAIN');
+await h3.page.screenshot({ path: 'scripts/shots/13-game-summary.png' });
+
+// PLAY AGAIN starts a fresh game
+await bothNext();
+await h3.page.waitForSelector('#countdown:not(.hidden)', { timeout: 15000 });
+await g3.page.waitForSelector('#countdown:not(.hidden)', { timeout: 15000 });
+ok(await h3.page.isHidden('#summary-self'), 'summary cleared for the new game');
+ok(true, 'new game started after PLAY AGAIN');
+
+await h3.ctx.close();
+await g3.ctx.close();
 await browser.close();
 
 console.log(failures === 0 ? '\nALL TESTS PASSED' : `\n${failures} FAILURES`);

@@ -74,7 +74,7 @@ const selfSrc = await page.getAttribute('#hs-selfie', 'src');
 ok(refSrc?.startsWith('data:image/jpeg') && refSrc.length > 4000, `card ref snapshot saved (${refSrc?.length} chars)`);
 ok(selfSrc?.startsWith('data:image/jpeg') && selfSrc.length > 4000, `card selfie snapshot saved (${selfSrc?.length} chars)`);
 ok((await page.textContent('#hs-score-big')) === hs, 'card shows the record score');
-ok((await page.textContent('#hs-date')).length > 5, 'card shows the record date');
+ok(/^HIGH SCORE • .{5,}/.test(await page.textContent('#hs-date')), 'card date prefixed with HIGH SCORE •');
 await page.click('#hs-close');
 ok(await page.$eval('#hs-popup', (d) => !d.open), 'card closes via X');
 
